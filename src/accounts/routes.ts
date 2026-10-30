@@ -10,25 +10,34 @@ import { changeStatus, createAccount, getAccount } from './service.js';
 const status = z.enum(['ACTIVE', 'BLOCKED', 'CLOSED']);
 
 const createBody = z.strictObject({
-  // Postgres text cannot hold NUL (22021); reject it here instead of letting it surface as a 500.
+  // One refine, not .regex(): zod would export a regex as an OpenAPI `pattern` without the `u` flag, and clients would read `\p` as a literal "p".
   holderName: z
     .string()
     .trim()
     .min(1)
     .max(120)
-    .regex(/^[^\0]*$/, 'must not contain NUL'),
-  document: z.string().transform((raw, ctx) => {
-    const document = normalizeDocument(raw);
-    if (document === null) {
-      ctx.issues.push({
-        code: 'custom',
-        message: 'document must have 11 or 14 digits',
-        input: raw,
-      });
-      return z.NEVER;
-    }
-    return document;
-  }),
+    .refine(
+      (s) => !/[\p{Cc}\p{Cs}\uFFFD]/u.test(s) && /\p{L}/u.test(s),
+      'must contain a letter and no control or invalid characters',
+    )
+    .describe(
+      '1 to 120 characters with at least one letter; no control characters, lone surrogates or U+FFFD',
+    ),
+  document: z
+    .string()
+    .trim()
+    .transform((raw, ctx) => {
+      const document = normalizeDocument(raw);
+      if (document === null) {
+        ctx.issues.push({
+          code: 'custom',
+          message: 'document must be a CPF or CNPJ: digits only or the standard mask',
+          input: raw,
+        });
+        return z.NEVER;
+      }
+      return document;
+    }),
 });
 
 // Declared so the serializer drops anything the handler adds by mistake. `id` is z.string(): z.uuid()
@@ -66,6 +75,7 @@ export async function accounts(app: FastifyInstance, opts: { pool: pg.Pool }) {
     },
     async (req, reply) => {
       const account = await createAccount(opts.pool, req.body);
+      req.log.info({ accountId: account.id }, 'account created'); // never the document or the name
       return reply
         .status(201)
         .header('location', `/accounts/${account.id}`)
@@ -97,7 +107,15 @@ export async function accounts(app: FastifyInstance, opts: { pool: pg.Pool }) {
         response: { 200: accountResponse, ...errorResponses(400, 404, 415, 422, 503) },
       },
     },
-    async (req) =>
-      toAccountResponse(await changeStatus(opts.pool, req.params.accountId, req.body.status)),
+    async (req) => {
+      const { account, from } = await changeStatus(
+        opts.pool,
+        req.params.accountId,
+        req.body.status,
+      );
+      if (from !== account.status)
+        req.log.info({ accountId: account.id, from, to: account.status }, 'account status changed');
+      return toAccountResponse(account);
+    },
   );
 }

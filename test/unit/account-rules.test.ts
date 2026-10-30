@@ -20,10 +20,24 @@ describe('checkStatusChange', () => {
 
 describe('normalizeDocument', () => {
   it.each([
+    ['12345678900', '12345678900'],
+    ['12345678000190', '12345678000190'],
     ['123.456.789-00', '12345678900'],
     ['12.345.678/0001-90', '12345678000190'],
-    [' 123 456 789 00 ', '12345678900'],
-    ['1234567890', null],
-    ['1234567890a', null],
   ])('normalizeDocument(%s) = %s', (raw, out) => expect(normalizeDocument(raw)).toBe(out));
+
+  it.each([
+    '1234567890',
+    '1234567890a',
+    '1.2.3.4-5678900', // separators in the wrong places
+    '---12345678900---',
+    '979/924/67-963',
+    '123.456.789/00', // CPF digits with a CNPJ separator
+    '12.345.678/0001-9', // one digit short
+    '123.456.789-0000', // CPF mask on 14 digits
+    '12345678/000190', // half a CNPJ mask
+    ' 123.456.789-00',
+    '123 456 789 00',
+    '١٢٣٤٥٦٧٨٩٠٠', // non-ASCII digits
+  ])('normalizeDocument(%j) = null', (raw) => expect(normalizeDocument(raw)).toBeNull());
 });
