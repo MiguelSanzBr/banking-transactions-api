@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import { z } from 'zod';
 import { toAmount } from '../shared/money.js';
-import { uuidParam } from '../shared/schemas.js';
+import { errorResponses, uuidParam } from '../shared/schemas.js';
 import { getStatement } from './service.js';
 
 // z.iso.date() checks the calendar (2026-02-30 and 2026-13-01 fail), so no Date round trip is needed here.
@@ -43,9 +43,11 @@ export async function statement(app: FastifyInstance, opts: { pool: pg.Pool }) {
     '/accounts/:accountId/statement',
     {
       schema: {
+        tags: ['statement'],
+        summary: 'Account statement, filtered by period and paginated by cursor',
         params: uuidParam('accountId'),
         querystring: query,
-        response: { 200: statementResponse },
+        response: { 200: statementResponse, ...errorResponses(400, 404, 503) },
       },
     },
     async (req) => {

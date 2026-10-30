@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import fastifySwagger from '@fastify/swagger';
+import fastifySwaggerUI from '@fastify/swagger-ui';
 import fastify, { type FastifyServerOptions, LogController } from 'fastify';
-import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
+import {
+  jsonSchemaTransform,
+  jsonSchemaTransformObject,
+  serializerCompiler,
+  validatorCompiler,
+} from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import { accounts } from './accounts/routes.js';
 import { deposits } from './deposits/routes.js';
@@ -29,6 +36,13 @@ export async function buildApp(opts: { pool: pg.Pool; logger?: FastifyServerOpti
     reply.header('x-correlation-id', req.id);
   });
 
+  // Before the routes: swagger collects each route through an onRoute hook.
+  await app.register(fastifySwagger, {
+    openapi: { info: { title: 'Banking Transactions API', version: '1.0.0' } },
+    transform: jsonSchemaTransform,
+    transformObject: jsonSchemaTransformObject, // emits the registry ids (ErrorEnvelope) as components
+  });
+  await app.register(fastifySwaggerUI, { routePrefix: '/docs' }); // also serves /docs/json
   // One register per module; later tasks add theirs here.
   await app.register(health, { pool: opts.pool });
   await app.register(accounts, { pool: opts.pool });

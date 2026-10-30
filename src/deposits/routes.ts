@@ -3,7 +3,12 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import { z } from 'zod';
 import { parseAmount, toAmount } from '../shared/money.js';
-import { amountField, optionalIdempotencyKeyHeader, uuidParam } from '../shared/schemas.js';
+import {
+  amountField,
+  errorResponses,
+  optionalIdempotencyKeyHeader,
+  uuidParam,
+} from '../shared/schemas.js';
 import { deposit } from './service.js';
 
 // `id` and `accountId` are z.string() for the same reason as in accounts: z.uuid() would 500 on odd version bits.
@@ -21,10 +26,12 @@ export async function deposits(app: FastifyInstance, opts: { pool: pg.Pool }) {
     '/accounts/:accountId/deposits',
     {
       schema: {
+        tags: ['deposits'],
+        summary: 'Deposit into an account (Idempotency-Key optional)',
         params: uuidParam('accountId'),
         headers: optionalIdempotencyKeyHeader,
         body: z.strictObject({ amount: amountField }),
-        response: { 201: depositResponse },
+        response: { 201: depositResponse, ...errorResponses(400, 404, 415, 422, 503) },
       },
     },
     async (req, reply) => {

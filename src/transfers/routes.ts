@@ -4,7 +4,7 @@ import type pg from 'pg';
 import { z } from 'zod';
 import { AppError } from '../shared/errors.js';
 import { parseAmount, toAmount } from '../shared/money.js';
-import { amountField, idempotencyKeyHeader, uuidParam } from '../shared/schemas.js';
+import { amountField, errorResponses, idempotencyKeyHeader, uuidParam } from '../shared/schemas.js';
 import type { TransferFailureCode } from './rules.js';
 import { createTransfer, getTransfer, type Transfer } from './service.js';
 
@@ -45,13 +45,15 @@ export async function transfers(app: FastifyInstance, opts: { pool: pg.Pool }) {
     '/transfers',
     {
       schema: {
+        tags: ['transfers'],
+        summary: 'Transfer between accounts (Idempotency-Key required)',
         headers: idempotencyKeyHeader,
         body: z.strictObject({
           sourceAccountId: accountId,
           destinationAccountId: accountId,
           amount: amountField,
         }),
-        response: { 201: transferResponse },
+        response: { 201: transferResponse, ...errorResponses(400, 404, 415, 422, 503) },
       },
     },
     async (req, reply) => {
@@ -84,7 +86,14 @@ export async function transfers(app: FastifyInstance, opts: { pool: pg.Pool }) {
 
   r.get(
     '/transfers/:transferId',
-    { schema: { params: uuidParam('transferId'), response: { 200: transferResponse } } },
+    {
+      schema: {
+        tags: ['transfers'],
+        summary: 'Get a transfer',
+        params: uuidParam('transferId'),
+        response: { 200: transferResponse, ...errorResponses(400, 404, 503) },
+      },
+    },
     async (req) => toTransferResponse(await getTransfer(opts.pool, req.params.transferId)),
   );
 }

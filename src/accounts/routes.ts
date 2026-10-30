@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import { z } from 'zod';
 import { toAmount } from '../shared/money.js';
-import { uuidParam } from '../shared/schemas.js';
+import { errorResponses, uuidParam } from '../shared/schemas.js';
 import { type Account, normalizeDocument } from './rules.js';
 import { changeStatus, createAccount, getAccount } from './service.js';
 
@@ -56,7 +56,14 @@ export async function accounts(app: FastifyInstance, opts: { pool: pg.Pool }) {
 
   r.post(
     '/accounts',
-    { schema: { body: createBody, response: { 201: accountResponse } } },
+    {
+      schema: {
+        tags: ['accounts'],
+        summary: 'Create an account',
+        body: createBody,
+        response: { 201: accountResponse, ...errorResponses(400, 409, 415, 503) },
+      },
+    },
     async (req, reply) => {
       const account = await createAccount(opts.pool, req.body);
       return reply
@@ -68,7 +75,14 @@ export async function accounts(app: FastifyInstance, opts: { pool: pg.Pool }) {
 
   r.get(
     '/accounts/:accountId',
-    { schema: { params: uuidParam('accountId'), response: { 200: accountResponse } } },
+    {
+      schema: {
+        tags: ['accounts'],
+        summary: 'Get an account with its balance',
+        params: uuidParam('accountId'),
+        response: { 200: accountResponse, ...errorResponses(400, 404, 503) },
+      },
+    },
     async (req) => toAccountResponse(await getAccount(opts.pool, req.params.accountId)),
   );
 
@@ -76,9 +90,11 @@ export async function accounts(app: FastifyInstance, opts: { pool: pg.Pool }) {
     '/accounts/:accountId/status',
     {
       schema: {
+        tags: ['accounts'],
+        summary: 'Change the account status (ACTIVE, BLOCKED or CLOSED; CLOSED is terminal)',
         params: uuidParam('accountId'),
         body: z.strictObject({ status }),
-        response: { 200: accountResponse },
+        response: { 200: accountResponse, ...errorResponses(400, 404, 415, 422, 503) },
       },
     },
     async (req) =>

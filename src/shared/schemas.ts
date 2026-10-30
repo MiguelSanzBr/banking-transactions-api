@@ -11,3 +11,20 @@ export const optionalIdempotencyKeyHeader = z.object({ 'idempotency-key': key.op
 
 // z.number() already rejects strings like "100" (400); decimals and range are checked by parseAmount.
 export const amountField = z.number();
+
+// The one error body every non-2xx response uses (built in shared/errors.ts). The registry id makes each route's
+// error response a $ref to a single components schema instead of a copy.
+export const errorEnvelope = z
+  .object({
+    code: z.string(),
+    message: z.string(),
+    timestamp: z.string(),
+    correlationId: z.string(),
+    details: z.array(z.object({ path: z.string(), message: z.string() })).optional(),
+    transferId: z.string().optional(),
+  })
+  .meta({ id: 'ErrorEnvelope' });
+
+// errorResponses(400, 404) is { 400: errorEnvelope, 404: errorEnvelope }; the literal keys keep each route's reply type exact.
+export const errorResponses = <C extends number>(...codes: C[]) =>
+  Object.fromEntries(codes.map((c) => [c, errorEnvelope])) as Record<C, typeof errorEnvelope>;
