@@ -9,6 +9,7 @@ const pool = createPool(config.databaseUrl, {
   max: config.dbPoolMax,
   lockTimeoutMs: config.dbLockTimeoutMs,
   statementTimeoutMs: config.dbStatementTimeoutMs,
+  idleInTxTimeoutMs: config.dbIdleInTxTimeoutMs,
 });
 await migrate(pool);
 

@@ -11,6 +11,7 @@ describe('loadConfig', () => {
       dbPoolMax: 10,
       dbLockTimeoutMs: 5000,
       dbStatementTimeoutMs: 15000,
+      dbIdleInTxTimeoutMs: 30000,
       outboxRelayEnabled: true,
       outboxRelayIntervalMs: 1000,
     });
@@ -21,8 +22,9 @@ describe('loadConfig', () => {
       DATABASE_URL: 'postgres://x',
       PORT: '8080',
       OUTBOX_RELAY_ENABLED: 'false',
+      DB_IDLE_IN_TX_TIMEOUT_MS: '45000',
     });
-    expect(c).toMatchObject({ port: 8080, outboxRelayEnabled: false });
+    expect(c).toMatchObject({ port: 8080, outboxRelayEnabled: false, dbIdleInTxTimeoutMs: 45000 });
   });
 
   it('fails fast without DATABASE_URL', () => expect(() => loadConfig({})).toThrow());

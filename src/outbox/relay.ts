@@ -12,16 +12,19 @@ export type OutboxEvent = {
 };
 export type Publisher = (event: OutboxEvent) => Promise<void>;
 
+const BATCH_SIZE = 50;
+
 // At-least-once: a crash after publish() but before COMMIT republishes the event, so consumers dedupe by eventId.
 // An event with attempts >= maxAttempts stays unpublished: the dead-letter set, queryable with SQL.
 // shortcut: row locks and one pool connection are held while publish() runs, so a hung publisher stalls
-// its batch; add a publish timeout when a real broker replaces logPublisher.
+// its batch, and one slower than idle_in_transaction_session_timeout loses the session (the round fails
+// and the batch is republished); add a publish timeout when a real broker replaces logPublisher.
 export function relayOnce(
   pool: pg.Pool,
   publish: Publisher,
-  opts: { batchSize?: number; maxAttempts?: number } = {},
+  opts: { batchSize?: number; maxAttempts?: number; log?: FastifyBaseLogger } = {},
 ): Promise<number> {
-  const { batchSize = 50, maxAttempts = 10 } = opts;
+  const { batchSize = BATCH_SIZE, maxAttempts = 10, log } = opts;
   return withTransaction(pool, async (c) => {
     // SKIP LOCKED: concurrent relays (other instances) take disjoint events instead of waiting.
     const { rows } = await c.query<OutboxEvent>(
@@ -46,6 +49,15 @@ export function relayOnce(
           'UPDATE outbox_events SET attempts = attempts + 1, last_error = $2 WHERE id = $1',
           [event.id, message],
         );
+        const attempts = event.attempts + 1;
+        const fields = {
+          eventId: event.id,
+          aggregateId: event.aggregateId,
+          attempts,
+          err: loggable(err),
+        };
+        if (attempts >= maxAttempts) log?.error(fields, 'outbox event parked');
+        else log?.warn(fields, 'outbox publish failed');
         continue;
       }
       // Outside the try: a database error here must abort the transaction, not count as a publish failure.
@@ -57,6 +69,7 @@ export function relayOnce(
 }
 
 // Rounds never overlap in this process: the next one is scheduled only after the current one ends.
+// A round that published a full batch means a backlog, so the next one starts right away.
 export function startRelay(
   pool: pg.Pool,
   publish: Publisher,
@@ -66,19 +79,22 @@ export function startRelay(
   let stopped = false;
   let timer: NodeJS.Timeout;
   let round: Promise<void> = Promise.resolve();
-  const schedule = () => {
+  const schedule = (delayMs: number) => {
     timer = setTimeout(() => {
-      round = relayOnce(pool, publish)
+      round = relayOnce(pool, publish, { log })
         .then(
-          () => {},
-          (err) => log.error({ err: loggable(err) }, 'outbox relay round failed'),
+          (published) => (published === BATCH_SIZE ? 0 : intervalMs),
+          (err) => {
+            log.error({ err: loggable(err) }, 'outbox relay round failed');
+            return intervalMs;
+          },
         )
-        .then(() => {
-          if (!stopped) schedule();
+        .then((next) => {
+          if (!stopped) schedule(next);
         });
-    }, intervalMs);
+    }, delayMs);
   };
-  schedule();
+  schedule(intervalMs);
   return async () => {
     stopped = true;
     clearTimeout(timer);

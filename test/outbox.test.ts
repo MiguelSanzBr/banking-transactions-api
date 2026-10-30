@@ -1,24 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
+import { buildApp } from '../src/app.js';
+import { createPool, migrate } from '../src/db.js';
 import { type OutboxEvent, type Publisher, relayOnce, startRelay } from '../src/outbox/relay.js';
-import { makeApp } from './helpers.js';
 
 let app: FastifyInstance;
 let pool: pg.Pool;
 
+// Own database: a relay publishes every pending event, and other test files assert theirs stay unpublished.
+const dbUrl = new URL('/outbox_test', inject('databaseUrl')).href;
+
 beforeAll(async () => {
-  ({ app, pool } = await makeApp());
+  const admin = createPool(inject('databaseUrl'));
+  await admin.query('CREATE DATABASE outbox_test');
+  await admin.end();
+  pool = createPool(dbUrl, { max: 20 });
+  await migrate(pool);
+  app = await buildApp({ pool });
 });
 afterAll(async () => {
   await app.close();
   await pool.end();
 });
-
-// Other test files write events into the same table: a big batch keeps our rows inside it.
-const BIG = { batchSize: 1000 };
 
 async function addEvent() {
   const id = randomUUID();
@@ -45,8 +51,8 @@ describe('outbox relay', () => {
     const collect: Publisher = async (e) => {
       seen.push(e);
     };
-    await relayOnce(pool, collect, BIG);
-    await relayOnce(pool, collect, BIG);
+    await relayOnce(pool, collect);
+    await relayOnce(pool, collect);
     expect(seen.filter((e) => e.aggregateId === aggregateId)).toEqual([
       {
         id,
@@ -64,7 +70,7 @@ describe('outbox relay', () => {
     const boom: Publisher = async (e) => {
       if (e.aggregateId === aggregateId) throw new Error('broker down');
     };
-    const opts = { ...BIG, maxAttempts: 3 };
+    const opts = { maxAttempts: 3 };
     for (let i = 0; i < 3; i++) await relayOnce(pool, boom, opts);
     expect(await rowOf(aggregateId)).toMatchObject({
       attempts: 3,
@@ -77,12 +83,37 @@ describe('outbox relay', () => {
     expect((await rowOf(aggregateId)).attempts).toBe(3);
   });
 
+  it('logs each publish failure as a warning and the parking one as an error', async () => {
+    const { id, aggregateId } = await addEvent();
+    const boom: Publisher = async (e) => {
+      if (e.aggregateId === aggregateId) throw new Error('broker down');
+    };
+    const log = { warn: vi.fn(), error: vi.fn() };
+    const opts = { maxAttempts: 2, log: log as unknown as FastifyBaseLogger };
+    await relayOnce(pool, boom, opts);
+    expect(log.warn).toHaveBeenCalledWith(
+      {
+        eventId: id,
+        aggregateId,
+        attempts: 1,
+        err: expect.objectContaining({ message: 'broker down' }),
+      },
+      'outbox publish failed',
+    );
+    expect(log.error).not.toHaveBeenCalled();
+    await relayOnce(pool, boom, opts);
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ eventId: id, aggregateId, attempts: 2 }),
+      'outbox event parked',
+    );
+  });
+
   it('truncates last_error to 500 characters', async () => {
     const { aggregateId } = await addEvent();
     const boom: Publisher = async (e) => {
       if (e.aggregateId === aggregateId) throw new Error('x'.repeat(600));
     };
-    await relayOnce(pool, boom, BIG);
+    await relayOnce(pool, boom);
     expect((await rowOf(aggregateId)).last_error).toBe('x'.repeat(500));
   });
 
@@ -92,7 +123,7 @@ describe('outbox relay', () => {
     const boom: Publisher = async (e) => {
       if (e.aggregateId === bad.aggregateId) throw new Error('bad\0byte');
     };
-    await relayOnce(pool, boom, BIG);
+    await relayOnce(pool, boom);
     expect(await rowOf(bad.aggregateId)).toMatchObject({
       attempts: 1,
       published_at: null,
@@ -134,6 +165,15 @@ describe('outbox relay', () => {
     expect(a.filter((id) => b.includes(id))).toEqual([]);
   });
 
+  it('a publisher slower than idle_in_transaction_session_timeout fails the round, not the process', async () => {
+    const { aggregateId } = await addEvent();
+    const short = createPool(dbUrl, { idleInTxTimeoutMs: 200 });
+    const slow: Publisher = () => sleep(500);
+    await expect(relayOnce(short, slow)).rejects.toThrow();
+    await short.end();
+    expect(await rowOf(aggregateId)).toMatchObject({ attempts: 0, published_at: null });
+  });
+
   it('startRelay publishes on an interval and its stop function waits for the round in progress', async () => {
     const mine = await addEvent();
     let inRound!: () => void;
@@ -160,5 +200,30 @@ describe('outbox relay', () => {
     const later = await addEvent(); // no round may run after stop()
     await sleep(60);
     expect((await rowOf(later.aggregateId)).published_at).toBeNull();
+  });
+
+  it('startRelay drains a backlog of several batches without waiting an interval per batch', async () => {
+    const mine = new Set<string>();
+    for (let i = 0; i < 120; i++) mine.add((await addEvent()).aggregateId);
+    let drained!: () => void;
+    const allSeen = new Promise<void>((resolve) => {
+      drained = resolve;
+    });
+    const seen = new Set<string>();
+    const started = Date.now();
+    const stop = startRelay(
+      pool,
+      async (e) => {
+        if (mine.has(e.aggregateId)) seen.add(e.aggregateId);
+        if (seen.size === mine.size) drained();
+      },
+      1000,
+      app.log,
+    );
+    await allSeen;
+    const elapsed = Date.now() - started;
+    await stop();
+    // The first round starts after one interval; at one batch of 50 per interval, 120 events need three.
+    expect(elapsed).toBeLessThan(2000);
   });
 });

@@ -9,12 +9,17 @@ const ok = z.object({ status: z.literal('ok') });
 export async function health(app: FastifyInstance, opts: { pool: pg.Pool }) {
   app.get(
     '/health',
-    { schema: { tags: ['ops'], summary: 'Liveness probe', response: { 200: ok } } },
+    // warn: the compose healthcheck probes every few seconds; failures (error level) still log.
+    {
+      logLevel: 'warn',
+      schema: { tags: ['ops'], summary: 'Liveness probe', response: { 200: ok } },
+    },
     async () => ({ status: 'ok' }),
   );
   app.get(
     '/ready',
     {
+      logLevel: 'warn',
       schema: {
         tags: ['ops'],
         summary: 'Readiness probe (checks the database)',
