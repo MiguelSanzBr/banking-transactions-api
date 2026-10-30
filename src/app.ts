@@ -6,6 +6,7 @@ import { accounts } from './accounts/routes.js';
 import { deposits } from './deposits/routes.js';
 import { health } from './health.js';
 import { errorHandler, notFoundHandler } from './shared/errors.js';
+import { transfers } from './transfers/routes.js';
 
 const CORRELATION_ID = /^[A-Za-z0-9._-]{1,128}$/;
 
@@ -31,5 +32,6 @@ export async function buildApp(opts: { pool: pg.Pool; logger?: FastifyServerOpti
   await app.register(health, { pool: opts.pool });
   await app.register(accounts, { pool: opts.pool });
   await app.register(deposits, { pool: opts.pool });
+  await app.register(transfers, { pool: opts.pool });
   return app;
 }

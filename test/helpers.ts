@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { expect, inject } from 'vitest';
 import type { AccountStatus } from '../src/accounts/rules.js';
@@ -51,3 +51,16 @@ export async function depositTo(app: FastifyInstance, accountId: string, amount:
   });
   expect(res.statusCode).toBe(201);
 }
+
+// A string body is sent as-is (raw JSON), so tests can control formatting and field order.
+export const postTransfer = (
+  app: FastifyInstance,
+  body: object | string,
+  key: string = randomUUID(),
+) =>
+  app.inject({
+    method: 'POST',
+    url: '/transfers',
+    headers: { 'content-type': 'application/json', 'idempotency-key': key },
+    payload: body,
+  });
