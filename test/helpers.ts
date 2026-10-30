@@ -42,3 +42,12 @@ export async function balanceOf(app: FastifyInstance, id: string): Promise<numbe
   expect(res.statusCode).toBe(200);
   return res.json().balance;
 }
+
+export async function depositTo(app: FastifyInstance, accountId: string, amount: number) {
+  const res = await app.inject({
+    method: 'POST',
+    url: `/accounts/${accountId}/deposits`,
+    payload: { amount },
+  });
+  expect(res.statusCode).toBe(201);
+}

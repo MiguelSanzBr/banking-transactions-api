@@ -3,6 +3,7 @@ import fastify, { type FastifyServerOptions, LogController } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import { accounts } from './accounts/routes.js';
+import { deposits } from './deposits/routes.js';
 import { health } from './health.js';
 import { errorHandler, notFoundHandler } from './shared/errors.js';
 
@@ -29,5 +30,6 @@ export async function buildApp(opts: { pool: pg.Pool; logger?: FastifyServerOpti
   // One register per module; later tasks add theirs here.
   await app.register(health, { pool: opts.pool });
   await app.register(accounts, { pool: opts.pool });
+  await app.register(deposits, { pool: opts.pool });
   return app;
 }
