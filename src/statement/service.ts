@@ -34,7 +34,7 @@ export async function getStatement(
   // UTC instants built here, never `::date` in SQL: that cast follows the session TimeZone and would shift the day.
   const from = input.from ? new Date(`${input.from}T00:00:00Z`) : null;
   const to = input.to ? new Date(Date.parse(`${input.to}T00:00:00Z`) + DAY_MS) : null; // exclusive: start of the next day
-  // Ordered by id, not created_at (see the constraints). `ledger_entries.id` is qualified on purpose: a bare `id`
+  // Ordered by id, not created_at (see README, "Extrato"). `ledger_entries.id` is qualified on purpose: a bare `id`
   // in ORDER BY resolves to the `id::text` output column and would sort "100" before "99". LIMIT + 1 detects a next page.
   const { rows } = await pool.query<StatementItem>(
     `SELECT id::text AS id, type, amount_cents AS "amountCents", balance_after_cents AS "balanceAfterCents",

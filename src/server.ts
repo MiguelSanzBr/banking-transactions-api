@@ -14,7 +14,7 @@ await migrate(pool);
 
 const app = await buildApp({
   pool,
-  logger: { level: config.logLevel, redact: ['req.headers.authorization'] },
+  logger: { level: config.logLevel },
 });
 // Swap db.ts's console.error fallback for the structured logger now that one exists.
 pool

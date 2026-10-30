@@ -43,7 +43,7 @@ export async function buildApp(opts: { pool: pg.Pool; logger?: FastifyServerOpti
     transformObject: jsonSchemaTransformObject, // emits the registry ids (ErrorEnvelope) as components
   });
   await app.register(fastifySwaggerUI, { routePrefix: '/docs' }); // also serves /docs/json
-  // One register per module; later tasks add theirs here.
+  // One register per module.
   await app.register(health, { pool: opts.pool });
   await app.register(accounts, { pool: opts.pool });
   await app.register(deposits, { pool: opts.pool });

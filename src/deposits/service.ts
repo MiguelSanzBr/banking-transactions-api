@@ -50,7 +50,11 @@ export function deposit(
       [randomUUID(), accountId, amountCents, idempotencyKey ?? null],
     );
     // No row: a concurrent request with the same key committed first, so answer from it.
-    if (!inserted.rows[0]) return (await findByKey()) as { deposit: Deposit; replayed: true };
+    if (!inserted.rows[0]) {
+      const winner = await findByKey();
+      if (!winner) throw new Error('deposit insert conflicted but no row has its idempotency key');
+      return winner;
+    }
 
     const updated = await c.query<{ balance: number }>(
       `UPDATE accounts SET balance_cents = balance_cents + $2, updated_at = now() WHERE id = $1 RETURNING balance_cents AS balance`,

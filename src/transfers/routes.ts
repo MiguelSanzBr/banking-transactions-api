@@ -4,12 +4,15 @@ import type pg from 'pg';
 import { z } from 'zod';
 import { AppError } from '../shared/errors.js';
 import { parseAmount, toAmount } from '../shared/money.js';
-import { amountField, errorResponses, idempotencyKeyHeader, uuidParam } from '../shared/schemas.js';
+import {
+  amountField,
+  errorResponses,
+  idempotencyKeyHeader,
+  uuid,
+  uuidParam,
+} from '../shared/schemas.js';
 import type { TransferFailureCode } from './rules.js';
 import { createTransfer, getTransfer, type Transfer } from './service.js';
-
-// Lower-cased because Postgres treats upper/lower-case uuids as equal; the same-account and replay checks compare strings.
-const accountId = z.uuid().toLowerCase();
 
 // Ids are z.string() for the same reason as in accounts: z.uuid() would 500 on odd version bits.
 const transferResponse = z.object({
@@ -49,8 +52,8 @@ export async function transfers(app: FastifyInstance, opts: { pool: pg.Pool }) {
         summary: 'Transfer between accounts (Idempotency-Key required)',
         headers: idempotencyKeyHeader,
         body: z.strictObject({
-          sourceAccountId: accountId,
-          destinationAccountId: accountId,
+          sourceAccountId: uuid,
+          destinationAccountId: uuid,
           amount: amountField,
         }),
         response: { 201: transferResponse, ...errorResponses(400, 404, 415, 422, 503) },

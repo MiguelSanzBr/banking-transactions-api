@@ -4,6 +4,4 @@ coverage
 .git
 .github
 .env
-.claude
-docs
 test

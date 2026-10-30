@@ -219,7 +219,7 @@ describe('POST /transfers', () => {
     expect(longKey.json().code).toBe('VALIDATION_ERROR');
 
     expect(await balanceOf(app, a)).toBe(100);
-    const ok = await postTransfer(app, body, 'abc123');
+    const ok = await postTransfer(app, body, `abc123-${randomUUID()}`);
     expect(ok.statusCode).toBe(201);
     expect(await balanceOf(app, a)).toBe(90);
   });

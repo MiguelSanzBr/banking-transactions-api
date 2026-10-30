@@ -6,8 +6,13 @@ up:
 down:
 	docker compose down
 
-test:
+# Installs dependencies on a fresh clone (and again whenever package-lock.json changes).
+node_modules: package-lock.json
+	npm ci
+	touch node_modules
+
+test: node_modules
 	npm test
 
-lint:
+lint: node_modules
 	npm run lint

@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type pg from 'pg';
 import { withTransaction } from '../db.js';
+import { loggable } from '../shared/errors.js';
 
 export type OutboxEvent = {
   id: string;
@@ -70,7 +71,7 @@ export function startRelay(
       round = relayOnce(pool, publish)
         .then(
           () => {},
-          (err) => log.error({ err }, 'outbox relay round failed'),
+          (err) => log.error({ err: loggable(err) }, 'outbox relay round failed'),
         )
         .then(() => {
           if (!stopped) schedule();

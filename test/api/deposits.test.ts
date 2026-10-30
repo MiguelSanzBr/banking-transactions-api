@@ -108,6 +108,22 @@ describe('deposit idempotency', () => {
     expect(await balanceOf(app, a)).toBe(100);
   });
 
+  it('same key twice on an upper-case account id → 201 both, replayed, credited once, id echoed lower-case', async () => {
+    const a = await newAccount(app);
+    const key = randomUUID();
+    const first = await post(a.toUpperCase(), { amount: 100 }, key);
+    const second = await post(a.toUpperCase(), { amount: 100 }, key);
+    expect([first.statusCode, second.statusCode]).toEqual([201, 201]);
+    expect(first.json().accountId).toBe(a);
+    expect(second.headers['idempotent-replayed']).toBe('true');
+    expect(await balanceOf(app, a)).toBe(100);
+    const stmt = await app.inject({
+      method: 'GET',
+      url: `/accounts/${a.toUpperCase()}/statement`,
+    });
+    expect(stmt.json().accountId).toBe(a);
+  });
+
   it('same key, different amount → 422 IDEMPOTENCY_KEY_REUSED, balance unchanged', async () => {
     const a = await newAccount(app);
     const key = randomUUID();
