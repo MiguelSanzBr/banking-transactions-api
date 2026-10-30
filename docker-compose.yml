@@ -1,6 +1,8 @@
 services:
   db:
     image: postgres:17-alpine
+    # Without it a crashed database stays down and the API answers 503 forever.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-banking}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-banking}
@@ -16,13 +18,26 @@ services:
 
   api:
     build: .
+    # Comes back by itself after a crash, or after exiting at boot because the database was down.
+    restart: unless-stopped
+    # Above the API's own 20 s shutdown deadline (itself above statement_timeout): docker's default 10 s
+    # would SIGKILL a drain that is still finishing in-flight requests.
+    stop_grace_period: 25s
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-banking}:${POSTGRES_PASSWORD:-banking}@db:5432/${POSTGRES_DB:-banking}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      DB_LOCK_TIMEOUT_MS: ${DB_LOCK_TIMEOUT_MS:-5000}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-15000}
+      DB_IDLE_IN_TX_TIMEOUT_MS: ${DB_IDLE_IN_TX_TIMEOUT_MS:-30000}
+      OUTBOX_RELAY_ENABLED: ${OUTBOX_RELAY_ENABLED:-true}
+      OUTBOX_RELAY_INTERVAL_MS: ${OUTBOX_RELAY_INTERVAL_MS:-1000}
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "${API_PORT:-3000}:3000"
+      # Loopback only: the API has no authentication.
+      - "127.0.0.1:${API_PORT:-3000}:3000"
     healthcheck:
       # 127.0.0.1, not localhost: busybox wget tries ::1 first and the server listens on IPv4 only.
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/ready"]

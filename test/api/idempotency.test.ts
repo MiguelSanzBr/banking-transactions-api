@@ -1,8 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { balanceOf, depositTo, makeApp, newAccount, postTransfer, setStatus } from '../helpers.js';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  balanceOf,
+  depositTo,
+  makeApp,
+  newAccount,
+  postTransfer,
+  setStatus,
+  waitForQueue,
+} from '../helpers.js';
 
 let app: FastifyInstance;
 let pool: pg.Pool;
@@ -108,6 +116,29 @@ describe('transfer idempotency', () => {
     ]);
   });
 
+  it('same key, different source → 422 IDEMPOTENCY_KEY_REUSED', async () => {
+    const { a, b } = await funded(100);
+    const c = await newAccount(app);
+    await depositTo(app, c, 100);
+    const key = newKey();
+    const first = await postTransfer(
+      app,
+      { sourceAccountId: a, destinationAccountId: b, amount: 30 },
+      key,
+    );
+    expect(first.statusCode).toBe(201);
+    const reused = await postTransfer(
+      app,
+      { sourceAccountId: c, destinationAccountId: b, amount: 30 },
+      key,
+    );
+    expect(reused.statusCode).toBe(422);
+    expect(reused.json().code).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect([await balanceOf(app, a), await balanceOf(app, b), await balanceOf(app, c)]).toEqual([
+      70, 30, 100,
+    ]);
+  });
+
   it('replay of a FAILED transfer stays FAILED even after the account is funded', async () => {
     const { a, b } = await funded(0);
     const key = newKey();
@@ -166,21 +197,7 @@ describe('transfer idempotency', () => {
       );
       const { rows } = await holder.query('SELECT pg_backend_pid() AS pid');
       const pending = Promise.all(Array.from({ length: 10 }, () => postTransfer(app, body, key)));
-      await vi.waitFor(
-        async () => {
-          // Postgres queues row-lock waiters behind each other, so follow the chain back to the holder.
-          const blocked = await pool.query(
-            `WITH RECURSIVE waiting(pid) AS (
-               SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
-               UNION
-               SELECT s.pid FROM pg_stat_activity s JOIN waiting w ON w.pid = ANY(pg_blocking_pids(s.pid))
-             ) SELECT count(*)::int AS n FROM waiting`,
-            [rows[0].pid],
-          );
-          expect(blocked.rows[0].n).toBe(10);
-        },
-        { timeout: 3000, interval: 20 },
-      );
+      await waitForQueue(pool, rows[0].pid, 10);
       await holder.query('COMMIT');
       res = await pending;
     } finally {

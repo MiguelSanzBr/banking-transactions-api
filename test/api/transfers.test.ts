@@ -227,7 +227,12 @@ describe('POST /transfers', () => {
   it('COMPLETED transfer writes one TransferCompleted event; FAILED writes none', async () => {
     const [a, b] = [await newAccount(app), await newAccount(app)];
     await depositTo(app, a, 100);
-    const ok = await postTransfer(app, { sourceAccountId: a, destinationAccountId: b, amount: 30 });
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/transfers',
+      headers: { 'idempotency-key': randomUUID(), 'x-correlation-id': 'evt-corr-1' },
+      payload: { sourceAccountId: a, destinationAccountId: b, amount: 30 },
+    });
     const failed = await postTransfer(app, {
       sourceAccountId: a,
       destinationAccountId: b,
@@ -253,6 +258,7 @@ describe('POST /transfers', () => {
       destinationAccountId: b,
       amount: 30,
       occurredAt: ok.json().createdAt,
+      correlationId: 'evt-corr-1',
     });
     expect(await eventsOf(failed.json().transferId)).toHaveLength(0);
   });

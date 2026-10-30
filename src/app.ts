@@ -26,6 +26,15 @@ export async function buildApp(opts: { pool: pg.Pool; logger?: FastifyServerOpti
       const h = req.headers['x-correlation-id'];
       return typeof h === 'string' && CORRELATION_ID.test(h) ? h : randomUUID();
     },
+    // Errors raised before routing (bad URL encoding, path param too long): same envelope; no hook runs
+    // for them, so the correlation header is set here.
+    // shortcut: llhttp parser errors (431, malformed request line) bypass the envelope, since no request
+    // exists yet; add a clientErrorHandler writing a raw envelope when a client must parse every error body.
+    frameworkErrors: (err, req, reply) =>
+      errorHandler(err, req, reply.header('x-correlation-id', req.id)),
+    requestTimeout: 30_000, // a client that stops mid-body would otherwise hold its connection forever
+    // Node cuts an unfinished request at the larger of the two timeouts; its 60 s headers default would win.
+    http: { headersTimeout: 30_000 },
   });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);

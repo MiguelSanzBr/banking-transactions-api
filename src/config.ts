@@ -9,6 +9,7 @@ const env = z.object({
   DB_POOL_MAX: int(10),
   DB_LOCK_TIMEOUT_MS: int(5000),
   DB_STATEMENT_TIMEOUT_MS: int(15000),
+  DB_IDLE_IN_TX_TIMEOUT_MS: int(30000),
   OUTBOX_RELAY_ENABLED: z.enum(['true', 'false']).default('true'),
   OUTBOX_RELAY_INTERVAL_MS: int(1000),
 });
@@ -20,6 +21,7 @@ export type Config = {
   dbPoolMax: number;
   dbLockTimeoutMs: number;
   dbStatementTimeoutMs: number;
+  dbIdleInTxTimeoutMs: number;
   outboxRelayEnabled: boolean;
   outboxRelayIntervalMs: number;
 };
@@ -33,6 +35,7 @@ export function loadConfig(source: NodeJS.ProcessEnv): Config {
     dbPoolMax: e.DB_POOL_MAX,
     dbLockTimeoutMs: e.DB_LOCK_TIMEOUT_MS,
     dbStatementTimeoutMs: e.DB_STATEMENT_TIMEOUT_MS,
+    dbIdleInTxTimeoutMs: e.DB_IDLE_IN_TX_TIMEOUT_MS,
     outboxRelayEnabled: e.OUTBOX_RELAY_ENABLED === 'true',
     outboxRelayIntervalMs: e.OUTBOX_RELAY_INTERVAL_MS,
   };

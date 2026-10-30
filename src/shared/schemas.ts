@@ -9,12 +9,18 @@ export const uuidParam = <K extends string>(name: K) =>
   z.object({ [name]: uuid } as Record<K, typeof uuid>);
 
 // Fastify lowercases header names. z.object strips unknown keys, so other headers pass.
-const key = z.string().regex(/^[\x21-\x7E]{1,255}$/);
+const KEY_MESSAGE = 'Idempotency-Key must be 1 to 255 visible ASCII characters (no spaces)';
+export const IDEMPOTENCY_KEY = /^[\x21-\x7E]{1,255}$/;
+const key = z.string(KEY_MESSAGE).regex(IDEMPOTENCY_KEY, KEY_MESSAGE);
 export const idempotencyKeyHeader = z.object({ 'idempotency-key': key });
 export const optionalIdempotencyKeyHeader = z.object({ 'idempotency-key': key.optional() });
 
-// z.number() already rejects strings like "100" (400); decimals and range are checked by parseAmount.
-export const amountField = z.number();
+// z.number() already rejects strings like "100" (400); decimals and range are checked by parseAmount (no multipleOf: float semantics).
+export const amountField = z.number().meta({
+  description:
+    'Amount in reais (BRL): greater than 0, at most 2 decimal places, at most 1000000000.00',
+  example: 250.5,
+});
 
 // The one error body every non-2xx response uses (built in shared/errors.ts). The registry id makes each route's
 // error response a $ref to a single components schema instead of a copy.

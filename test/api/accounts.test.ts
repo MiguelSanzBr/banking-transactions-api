@@ -2,7 +2,15 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { balanceOf, makeApp, newAccount, randomDocument, setStatus } from '../helpers.js';
+import { buildApp } from '../../src/app.js';
+import {
+  balanceOf,
+  depositTo,
+  makeApp,
+  newAccount,
+  randomDocument,
+  setStatus,
+} from '../helpers.js';
 
 let app: FastifyInstance;
 let pool: pg.Pool;
@@ -62,11 +70,67 @@ describe('POST /accounts', () => {
     [{ holderName: '   ', document: '12345678900' }],
     [{ holderName: 'X'.repeat(121), document: '12345678900' }],
     [{ holderName: 'a\u0000b', document: '12345678900' }], // Postgres rejects NUL (22021): must be 400, not 500
+    [{ holderName: 'a\u0007b', document: '12345678900' }], // BEL
+    [{ holderName: 'a\u001b[31mb', document: '12345678900' }], // ESC
+    [{ holderName: 'a\nb', document: '12345678900' }],
+    [{ holderName: 'a\u0085b', document: '12345678900' }], // C1 control (NEL)
+    [{ holderName: 'a\ufffdb', document: '12345678900' }], // what invalid UTF-8 becomes
+    [{ holderName: 'a\ud800b', document: '12345678900' }], // lone surrogate: Postgres would store U+FFFD
+    [{ holderName: '\u200b', document: '12345678900' }], // zero-width only: trim() keeps it
+    [{ holderName: 'Maria \u202eavliS', document: '12345678900' }], // bidi override: displays as "Maria Silva"
+    [{ holderName: 'a\u202ab', document: '12345678900' }], // first bidi embedding control
+    [{ holderName: 'a\u2066b\u2069', document: '12345678900' }], // bidi isolate controls
+    [{ holderName: '12345', document: '12345678900' }], // no letter
     [{ holderName: 'X', document: 'abc' }],
+    [{ holderName: 'X', document: '1.2.3.4-5678900' }], // separators in the wrong places
+    [{ holderName: 'X', document: '123 456 789 00' }], // internal spaces are not a mask
     [{ holderName: 'X', document: '12345678900', balance: 1000 }],
     [{ holderName: 'X', document: '12345678900', status: 'BLOCKED' }],
   ])('invalid body %j → 400 VALIDATION_ERROR', async (payload) => {
     const res = await post(payload);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('VALIDATION_ERROR');
+  });
+
+  it.each([
+    'José da Silva',
+    "D'Angelo",
+    'Anne-Marie',
+    'Ana 🌟',
+    '李小龙',
+    '\u0639\u0644\u06cc\u200c\u0631\u0636\u0627', // Persian with a zero-width non-joiner (ZWNJ)
+    'Ana \u{1F469}\u200d\u{1F4BB}', // zero-width joiner (ZWJ) sequence
+  ])('holder name %j is accepted as typed', async (holderName) => {
+    const res = await post({ holderName, document: randomDocument() });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().holderName).toBe(holderName);
+  });
+
+  it.each([
+    [' ', ''],
+    ['', ' '],
+    ['\t', '\n'],
+  ])(
+    'document padded with %j and %j (copy-paste) → 201, stored without it',
+    async (before, after) => {
+      const doc = randomDocument();
+      const res = await post({ holderName: 'X', document: `${before}${mask(doc)}${after}` });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().document).toBe(doc);
+    },
+  );
+
+  it('invalid UTF-8 bytes in the body → 400 VALIDATION_ERROR (not stored as U+FFFD)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/accounts',
+      headers: { 'content-type': 'application/json' },
+      payload: Buffer.concat([
+        Buffer.from('{"holderName":"Jo'),
+        Buffer.from([0xff]),
+        Buffer.from('o","document":"12345678900"}'),
+      ]),
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_ERROR');
   });
@@ -92,6 +156,36 @@ describe('POST /accounts', () => {
     });
     expect(res.statusCode).toBe(415);
     expect(res.json().code).toBe('UNSUPPORTED_MEDIA_TYPE');
+  });
+});
+
+describe('account lifecycle logs', () => {
+  it('logs creation and real status changes by accountId, never the document or the name', async () => {
+    const lines: string[] = [];
+    const logApp = await buildApp({
+      pool,
+      logger: { stream: { write: (l: string) => lines.push(l) } },
+    });
+    const doc = randomDocument();
+    const created = await logApp.inject({
+      method: 'POST',
+      url: '/accounts',
+      payload: { holderName: 'Zelia Confidencial', document: doc },
+    });
+    const id = created.json().id;
+    for (const status of ['BLOCKED', 'BLOCKED']) // the second one is a no-op: not a change
+      await logApp.inject({ method: 'PATCH', url: `/accounts/${id}/status`, payload: { status } });
+    await logApp.close();
+
+    const logs = lines.map((l) => JSON.parse(l));
+    expect(logs.filter((l) => l.msg === 'account created')).toEqual([
+      expect.objectContaining({ accountId: id, level: 30 }),
+    ]);
+    expect(logs.filter((l) => l.msg === 'account status changed')).toEqual([
+      expect.objectContaining({ accountId: id, from: 'ACTIVE', to: 'BLOCKED', level: 30 }),
+    ]);
+    expect(lines.join('')).not.toContain(doc);
+    expect(lines.join('')).not.toContain('Confidencial');
   });
 });
 
@@ -172,7 +266,7 @@ describe('PATCH /accounts/:id/status', () => {
 
   it('PATCH to CLOSED with balance > 0 → 422 ACCOUNT_HAS_BALANCE, status unchanged', async () => {
     const id = await newAccount(app);
-    await pool.query('UPDATE accounts SET balance_cents = 100 WHERE id = $1', [id]); // no deposit endpoint yet
+    await depositTo(app, id, 1);
     const res = await patchStatus(id, { status: 'CLOSED' });
     expect(res.statusCode).toBe(422);
     expect(res.json().code).toBe('ACCOUNT_HAS_BALANCE');

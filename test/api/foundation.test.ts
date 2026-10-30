@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
@@ -44,13 +45,103 @@ describe('health', () => {
   });
 });
 
+describe('request logs', () => {
+  async function loggedApp() {
+    const lines: string[] = [];
+    const logged = await buildApp({
+      pool,
+      logger: { stream: { write: (l: string) => lines.push(l) } },
+    });
+    return { logged, logs: () => lines.map((l) => JSON.parse(l)) };
+  }
+
+  it('/health and /ready answer without writing request logs', async () => {
+    const { logged, logs } = await loggedApp();
+    expect((await logged.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+    expect((await logged.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
+    await logged.close();
+    expect(logs()).toEqual([]);
+  });
+
+  it('a 4xx is logged at info with its code, status and Idempotency-Key, never the body', async () => {
+    const { logged, logs } = await loggedApp();
+    const notFound = await logged.inject({
+      method: 'POST',
+      url: '/transfers',
+      headers: { 'idempotency-key': 'log-key-1' },
+      payload: { sourceAccountId: randomUUID(), destinationAccountId: randomUUID(), amount: 1 },
+    });
+    const invalid = await logged.inject({
+      method: 'POST',
+      url: '/accounts',
+      payload: { document: '12345678901' },
+    });
+    await logged.close();
+    expect([notFound.statusCode, invalid.statusCode]).toEqual([404, 400]);
+    expect(logs()).toContainEqual(
+      expect.objectContaining({
+        level: 30,
+        msg: 'request rejected',
+        code: 'ACCOUNT_NOT_FOUND',
+        statusCode: 404,
+        idempotencyKey: 'log-key-1',
+      }),
+    );
+    expect(logs()).toContainEqual(
+      expect.objectContaining({
+        msg: 'request rejected',
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+      }),
+    );
+    expect(JSON.stringify(logs())).not.toContain('12345678901');
+  });
+
+  it('an invalid Idempotency-Key is flagged on the 4xx line, never copied into it', async () => {
+    const { logged, logs } = await loggedApp();
+    const res = await logged.inject({
+      method: 'POST',
+      url: '/transfers',
+      headers: { 'idempotency-key': `has space ${'x'.repeat(300)}` },
+      payload: { sourceAccountId: randomUUID(), destinationAccountId: randomUUID(), amount: 1 },
+    });
+    await logged.close();
+    expect(res.statusCode).toBe(400);
+    const rejected = logs().find((l) => l.msg === 'request rejected');
+    expect(rejected).toMatchObject({ code: 'VALIDATION_ERROR', idempotencyKeyInvalid: true });
+    expect(rejected).not.toHaveProperty('idempotencyKey');
+    expect(JSON.stringify(logs())).not.toContain('has space');
+  });
+
+  it.each([
+    ['valid', 'retry-key-1', { idempotencyKey: 'retry-key-1' }],
+    ['invalid', 'has space', { idempotencyKeyInvalid: true }],
+  ])('the 5xx line follows the same Idempotency-Key rule (%s key)', async (_, key, fields) => {
+    const { logged, logs } = await loggedApp();
+    logged.get('/t/boom', async () => {
+      throw new Error('boom');
+    });
+    const res = await logged.inject({
+      method: 'GET',
+      url: '/t/boom',
+      headers: { 'idempotency-key': key },
+    });
+    await logged.close();
+    expect(res.statusCode).toBe(500);
+    expect(logs()).toContainEqual(
+      expect.objectContaining({ level: 50, msg: 'request failed', ...fields }),
+    );
+    expect(JSON.stringify(logs())).not.toContain('has space');
+  });
+});
+
 describe('readiness on any failure', () => {
   it('GET /ready → 503 (not 500) for errors outside the retryable list, logged without detail', async () => {
     const lines: string[] = [];
     const failing = {
       query: async () => {
-        throw Object.assign(new Error('the database system is starting up'), {
-          code: '57P03',
+        throw Object.assign(new Error('relation "accounts" does not exist'), {
+          code: '42P01',
           detail: 'Key (document)=(12345678901)',
         });
       },
@@ -64,7 +155,7 @@ describe('readiness on any failure', () => {
     expect(res.statusCode).toBe(503);
     expect(res.headers['retry-after']).toBe('1');
     expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
-    expect(lines.join('')).toContain('starting up');
+    expect(lines.join('')).toContain('does not exist');
     expect(lines.join('')).not.toContain('12345678901');
   });
 });
@@ -78,6 +169,21 @@ describe('error envelope', () => {
       message: expect.any(String),
       timestamp: expect.stringMatching(/Z$/),
       correlationId: expect.any(String),
+    });
+  });
+
+  it.each([
+    ['bad percent-encoding in the URL', '/accounts/%ZZ'],
+    ['path param longer than maxParamLength', `/accounts/${'a'.repeat(101)}`],
+  ])('%s → 400 VALIDATION_ERROR envelope with the correlation header', async (_, url) => {
+    const res = await app.inject({ method: 'GET', url, headers: { 'x-correlation-id': 'fw-1' } });
+    expect(res.statusCode).toBe(400);
+    expect(res.headers['x-correlation-id']).toBe('fw-1');
+    expect(res.json()).toEqual({
+      code: 'VALIDATION_ERROR',
+      message: expect.any(String),
+      timestamp: expect.stringMatching(/Z$/),
+      correlationId: 'fw-1',
     });
   });
 
@@ -100,6 +206,9 @@ describe('error envelope', () => {
       });
       testApp.get<{ Params: { code: string } }>('/t/pg/:code', async (req) => {
         throw pgError(req.params.code);
+      });
+      testApp.get<{ Querystring: { message: string } }>('/t/no-code', async (req) => {
+        throw new Error(req.query.message);
       });
     });
     afterAll(() => testApp.close());
@@ -170,16 +279,54 @@ describe('error envelope', () => {
       expect(res.body).not.toMatch(/select|accounts|12345678901/);
     });
 
-    it.each(['55P03', '57014', '40P01', '40001', '57P01', 'ECONNREFUSED'])(
-      'error code %s → 503 SERVICE_UNAVAILABLE + Retry-After',
-      async (code) => {
-        const res = await testApp.inject({ method: 'GET', url: `/t/pg/${code}` });
-        expect(res.statusCode).toBe(503);
-        expect(res.headers['retry-after']).toBe('1');
-        expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
-        expect(res.body).not.toContain('secret');
-      },
-    );
+    it.each([
+      '55P03',
+      '57014',
+      '40P01',
+      '40001',
+      '57P01',
+      '57P02',
+      '57P03',
+      '53300',
+      '08006',
+      '08001',
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'EAI_AGAIN',
+      'ETIMEDOUT',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'ECONNRESET',
+      'EPIPE',
+    ])('error code %s → 503 SERVICE_UNAVAILABLE + Retry-After', async (code) => {
+      const res = await testApp.inject({ method: 'GET', url: `/t/pg/${code}` });
+      expect(res.statusCode).toBe(503);
+      expect(res.headers['retry-after']).toBe('1');
+      expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
+      expect(res.body).not.toContain('secret');
+    });
+
+    it('database host that does not resolve → 503 on a data route, without host or code', async () => {
+      const lost = createPool('postgres://u:p@db-does-not-exist.invalid:5432/x');
+      const lostApp = await buildApp({ pool: lost });
+      const res = await lostApp.inject({ method: 'GET', url: `/accounts/${randomUUID()}` });
+      expect(res.statusCode).toBe(503);
+      expect(res.headers['retry-after']).toBe('1');
+      expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
+      expect(res.body).not.toMatch(/db-does-not-exist|ENOTFOUND|EAI_AGAIN/);
+      await lostApp.close();
+      await lost.end();
+    });
+
+    it.each([
+      'Client has encountered a connection error and is not queryable', // the connection had already died
+      'Connection terminated unexpectedly', // the connection dropped mid-query
+    ])('pg error without a code "%s" → 503', async (message) => {
+      const res = await testApp.inject({ method: 'GET', url: '/t/no-code', query: { message } });
+      expect(res.statusCode).toBe(503);
+      expect(res.headers['retry-after']).toBe('1');
+      expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
+    });
 
     it('a pool that was ended → 503 SERVICE_UNAVAILABLE', async () => {
       const ended = createPool('postgres://u:p@127.0.0.1:1/x');
@@ -204,6 +351,18 @@ describe('error envelope', () => {
       held.release();
       await tinyApp.close();
       await tiny.end();
+    });
+
+    it('a query the database never answers → 503 after the client-side query timeout', async () => {
+      const slow = createPool(inject('databaseUrl'), { queryTimeoutMs: 100 });
+      const slowApp = await buildApp({ pool: slow });
+      slowApp.get('/t/query', async () => slow.query('SELECT pg_sleep(0.5)'));
+      const res = await slowApp.inject({ method: 'GET', url: '/t/query' });
+      expect(res.statusCode).toBe(503);
+      expect(res.headers['retry-after']).toBe('1');
+      expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
+      await slowApp.close();
+      await slow.end();
     });
 
     it('5xx logs omit pg detail (it can hold the document)', async () => {
@@ -254,7 +413,7 @@ describe('correlation id', () => {
     });
     await logged.inject({
       method: 'GET',
-      url: '/health',
+      url: '/nope',
       headers: { 'x-correlation-id': 'log-1' },
     });
     await logged.close();

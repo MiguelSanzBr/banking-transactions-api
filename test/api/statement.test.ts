@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -77,6 +78,48 @@ describe('GET /accounts/:accountId/statement', () => {
     for (const i of items) expect(new Date(i.createdAt).toISOString()).toBe(i.createdAt);
   });
 
+  it('a deposit and a transfer have the same createdAt in their response and statement entries, even after a lock wait', async () => {
+    const [a, b] = [await newAccount(app), await newAccount(app)];
+    await depositTo(app, a, 100);
+    // Hold a's lock so both requests begin well before they can move money: the contention case.
+    const holder = await pool.connect();
+    let dep: Awaited<ReturnType<typeof postTransfer>>;
+    let tr: Awaited<ReturnType<typeof postTransfer>>;
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE', [a]);
+      const pending = Promise.all([
+        app.inject({ method: 'POST', url: `/accounts/${a}/deposits`, payload: { amount: 10 } }),
+        postTransfer(app, { sourceAccountId: a, destinationAccountId: b, amount: 30 }),
+      ]);
+      await setTimeout(50);
+      await holder.query('COMMIT');
+      [dep, tr] = await pending;
+    } finally {
+      await holder.query('ROLLBACK').catch(() => {}); // no-op after COMMIT
+      holder.release();
+    }
+    expect([dep.statusCode, tr.statusCode]).toEqual([201, 201]);
+    const entries = [...(await statement(a)).json().items, ...(await statement(b)).json().items];
+    const createdAtOf = (field: 'depositId' | 'transferId', id: string) =>
+      entries.filter((i) => i[field] === id).map((i) => i.createdAt);
+    expect(createdAtOf('depositId', dep.json().id)).toEqual([dep.json().createdAt]);
+    expect(createdAtOf('transferId', tr.json().id)).toEqual([
+      tr.json().createdAt,
+      tr.json().createdAt,
+    ]);
+    // Exact in SQL too, not only at the API's millisecond precision.
+    const { rows } = await pool.query(
+      `SELECT l.created_at = coalesce(t.created_at, d.created_at) AS same
+         FROM ledger_entries l
+         LEFT JOIN transfers t ON t.id = l.transfer_id
+         LEFT JOIN deposits d ON d.id = l.deposit_id
+        WHERE l.transfer_id = $1 OR l.deposit_id = $2`,
+      [tr.json().id, dep.json().id],
+    );
+    expect(rows.map((r) => r.same)).toEqual([true, true, true]);
+  });
+
   it('FAILED transfers do not appear', async () => {
     const [a, b] = [await newAccount(app), await newAccount(app)];
     await depositTo(app, a, 50);
@@ -127,6 +170,10 @@ describe('GET /accounts/:accountId/statement', () => {
     'limit=101',
     'limit=1.5',
     'limit=abc',
+    'limit=1e1', // plain digits only: Number() would read these as 10, 16, 5 and 3
+    'limit=0x10',
+    'limit=%205',
+    'limit=%2B3',
     'cursor=@@',
     'cursor=',
     `cursor=${Buffer.from('abc').toString('base64url')}`,
@@ -139,10 +186,39 @@ describe('GET /accounts/:accountId/statement', () => {
     expect(res.json().code).toBe('VALIDATION_ERROR');
   });
 
+  it.each(['abc', '1e1', '0', '101'])(
+    '?limit=%s → 400 with a human message, not the regex',
+    async (limit) => {
+      const res = await statement(await newAccount(app), `?limit=${limit}`);
+      expect(res.statusCode).toBe(400);
+      expect(res.json().details).toEqual([
+        { path: 'limit', message: 'limit must be an integer from 1 to 100' },
+      ]);
+    },
+  );
+
+  it('an invalid cursor is a schema error that names the field', async () => {
+    const res = await statement(await newAccount(app), '?cursor=@@');
+    expect(res.statusCode).toBe(400);
+    expect(res.json().details).toEqual([expect.objectContaining({ path: 'cursor' })]);
+  });
+
   it('invalid account id → 400 VALIDATION_ERROR', async () => {
     const res = await statement('not-a-uuid');
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_ERROR');
+  });
+
+  it('limit defaults to 50 and accepts 100', async () => {
+    const a = await newAccount(app);
+    for (let i = 0; i < 51; i++) await depositTo(app, a, 1);
+    const page = (await statement(a)).json();
+    expect(page.items).toHaveLength(50);
+    expect(page.nextCursor).not.toBeNull();
+    const max = await statement(a, '?limit=100');
+    expect(max.statusCode).toBe(200);
+    expect(max.json().items).toHaveLength(51);
+    expect(max.json().nextCursor).toBeNull();
   });
 
   it('paginates 5 entries with limit=2 → 2, 2, 1, no duplicates, last nextCursor null', async () => {

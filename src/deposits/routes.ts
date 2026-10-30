@@ -35,13 +35,18 @@ export async function deposits(app: FastifyInstance, opts: { pool: pg.Pool }) {
       },
     },
     async (req, reply) => {
+      const idempotencyKey = req.headers['idempotency-key'];
       const result = await deposit(opts.pool, {
         accountId: req.params.accountId,
         amountCents: parseAmount(req.body.amount),
-        idempotencyKey: req.headers['idempotency-key'],
+        idempotencyKey,
       });
-      if (result.replayed) reply.header('idempotent-replayed', 'true');
       const d = result.deposit;
+      req.log.info(
+        { depositId: d.id, accountId: d.accountId, idempotencyKey, replayed: result.replayed },
+        'deposit processed',
+      );
+      if (result.replayed) reply.header('idempotent-replayed', 'true');
       return reply.status(201).send({
         id: d.id,
         accountId: d.accountId,
