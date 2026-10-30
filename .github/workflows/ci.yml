@@ -1,0 +1,24 @@
+name: ci
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - run: docker build .
+      - run: docker compose up -d --build --wait
+      - run: curl -fsS localhost:3000/ready
+      - if: always()
+        run: docker compose down -v
