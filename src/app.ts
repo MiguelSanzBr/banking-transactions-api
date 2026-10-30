@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fastify, { type FastifyServerOptions, LogController } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import type pg from 'pg';
+import { accounts } from './accounts/routes.js';
 import { health } from './health.js';
 import { errorHandler, notFoundHandler } from './shared/errors.js';
 
@@ -18,6 +19,7 @@ export async function buildApp(opts: { pool: pg.Pool; logger?: FastifyServerOpti
   });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+  app.removeContentTypeParser('text/plain'); // on by default; removed so non-JSON bodies get 415, not 400
   app.setErrorHandler(errorHandler);
   app.setNotFoundHandler(notFoundHandler);
   app.addHook('onSend', async (req, reply) => {
@@ -26,5 +28,6 @@ export async function buildApp(opts: { pool: pg.Pool; logger?: FastifyServerOpti
 
   // One register per module; later tasks add theirs here.
   await app.register(health, { pool: opts.pool });
+  await app.register(accounts, { pool: opts.pool });
   return app;
 }
