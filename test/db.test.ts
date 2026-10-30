@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 import { createPool, withTransaction } from '../src/db.js';
 import { depositTo, makeApp, newAccount, postTransfer } from './helpers.js';
 
@@ -62,6 +62,35 @@ describe('dropped connection', () => {
       amount: 10,
     });
     expect(retry.statusCode).toBe(201);
+  });
+
+  it('an error on an idle client (e.g. a database restart) is logged, not thrown, and the pool recovers', async () => {
+    const idle = createPool(inject('databaseUrl'), { max: 1 });
+    const client = await idle.connect();
+    client.release(); // idle now: pg-pool forwards its errors to the pool's 'error' event
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // Without a pool 'error' listener this emit throws, as an uncaught exception would in production.
+      expect(() => client.emit('error', new Error('terminating connection'))).not.toThrow();
+      expect(logged).toHaveBeenCalledWith('idle pg client error:', 'terminating connection');
+    } finally {
+      logged.mockRestore();
+    }
+    expect((await idle.query('SELECT 1 AS ok')).rows).toEqual([{ ok: 1 }]);
+    await idle.end();
+  });
+});
+
+describe('withTransaction', () => {
+  it('runs at READ COMMITTED even when the session default is stricter', async () => {
+    const strict = createPool(inject('databaseUrl'), { max: 1 }); // one client: the SET and the transaction share a session
+    await strict.query("SET default_transaction_isolation = 'repeatable read'");
+    const level = await withTransaction(
+      strict,
+      async (c) => (await c.query('SHOW transaction_isolation')).rows[0].transaction_isolation,
+    );
+    await strict.end();
+    expect(level).toBe('read committed');
   });
 });
 

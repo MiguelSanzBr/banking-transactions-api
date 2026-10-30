@@ -11,8 +11,6 @@ const pool = createPool(config.databaseUrl, {
   statementTimeoutMs: config.dbStatementTimeoutMs,
   idleInTxTimeoutMs: config.dbIdleInTxTimeoutMs,
 });
-await migrate(pool);
-
 const app = await buildApp({
   pool,
   logger: { level: config.logLevel },
@@ -22,13 +20,30 @@ pool
   .removeAllListeners('error')
   .on('error', (err) => app.log.error({ err: loggable(err) }, 'idle pg client error'));
 
+try {
+  await migrate(pool);
+} catch (err) {
+  // E.g. the database is down: one structured line instead of a raw stack; the restart policy retries.
+  app.log.fatal({ err: loggable(err) }, 'boot failed');
+  process.exit(1);
+}
+
 let stopRelay: (() => Promise<void>) | undefined; // set after listen; undefined if the relay is disabled
 let closing = false; // SIGTERM then SIGINT must not end the pool twice
 const shutdown = async () => {
   if (closing) return;
   closing = true;
+  // In-flight queries end within statement_timeout (15 s), but a frozen database can hold the drain open;
+  // exit before compose's stop_grace_period (25 s) turns the stop into a SIGKILL.
+  setTimeout(() => {
+    app.log.error('shutdown deadline exceeded, exiting');
+    process.exit(1);
+  }, 20_000).unref();
   try {
     await stopRelay?.(); // first: an in-flight round must end before the pool does
+    // close() drops only the sockets idle right then; one whose request finishes later would stay open for
+    // keepAliveTimeout (72 s), so keep closing the idle ones until close() resolves.
+    setInterval(() => app.server.closeIdleConnections(), 250).unref();
     await app.close();
     await pool.end();
   } catch (err) {

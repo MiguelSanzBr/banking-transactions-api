@@ -1,6 +1,8 @@
 services:
   db:
     image: postgres:17-alpine
+    # Without it a crashed database stays down and the API answers 503 forever.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-banking}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-banking}
@@ -18,6 +20,9 @@ services:
     build: .
     # Comes back by itself after a crash, or after exiting at boot because the database was down.
     restart: unless-stopped
+    # Above the API's own 20 s shutdown deadline (itself above statement_timeout): docker's default 10 s
+    # would SIGKILL a drain that is still finishing in-flight requests.
+    stop_grace_period: 25s
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-banking}:${POSTGRES_PASSWORD:-banking}@db:5432/${POSTGRES_DB:-banking}
       LOG_LEVEL: ${LOG_LEVEL:-info}

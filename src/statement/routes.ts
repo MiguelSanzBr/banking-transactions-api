@@ -19,6 +19,7 @@ const cursor = z.string().transform((c, ctx) => {
 
 // z.iso.date() checks the calendar (2026-02-30 and 2026-13-01 fail), so no Date round trip is needed here.
 // YYYY-MM-DD strings sort like dates, hence the plain string comparison.
+const LIMIT_MESSAGE = 'limit must be an integer from 1 to 100';
 const query = z
   .object({
     from: z.iso.date().optional(),
@@ -27,9 +28,9 @@ const query = z
     // default from /docs, hence the description.
     limit: z
       .string()
-      .regex(/^\d+$/)
+      .regex(/^\d+$/, LIMIT_MESSAGE)
       .transform(Number)
-      .pipe(z.number().min(1).max(100))
+      .pipe(z.number().min(1, LIMIT_MESSAGE).max(100, LIMIT_MESSAGE))
       .default(50)
       .meta({ description: 'Page size, 1 to 100 (default 50)' }),
     cursor: cursor.optional(),

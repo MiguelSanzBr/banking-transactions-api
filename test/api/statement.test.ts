@@ -186,6 +186,17 @@ describe('GET /accounts/:accountId/statement', () => {
     expect(res.json().code).toBe('VALIDATION_ERROR');
   });
 
+  it.each(['abc', '1e1', '0', '101'])(
+    '?limit=%s → 400 with a human message, not the regex',
+    async (limit) => {
+      const res = await statement(await newAccount(app), `?limit=${limit}`);
+      expect(res.statusCode).toBe(400);
+      expect(res.json().details).toEqual([
+        { path: 'limit', message: 'limit must be an integer from 1 to 100' },
+      ]);
+    },
+  );
+
   it('an invalid cursor is a schema error that names the field', async () => {
     const res = await statement(await newAccount(app), '?cursor=@@');
     expect(res.statusCode).toBe(400);

@@ -77,6 +77,9 @@ describe('POST /accounts', () => {
     [{ holderName: 'a\ufffdb', document: '12345678900' }], // what invalid UTF-8 becomes
     [{ holderName: 'a\ud800b', document: '12345678900' }], // lone surrogate: Postgres would store U+FFFD
     [{ holderName: '\u200b', document: '12345678900' }], // zero-width only: trim() keeps it
+    [{ holderName: 'Maria \u202eavliS', document: '12345678900' }], // bidi override: displays as "Maria Silva"
+    [{ holderName: 'a\u202ab', document: '12345678900' }], // first bidi embedding control
+    [{ holderName: 'a\u2066b\u2069', document: '12345678900' }], // bidi isolate controls
     [{ holderName: '12345', document: '12345678900' }], // no letter
     [{ holderName: 'X', document: 'abc' }],
     [{ holderName: 'X', document: '1.2.3.4-5678900' }], // separators in the wrong places
@@ -89,14 +92,19 @@ describe('POST /accounts', () => {
     expect(res.json().code).toBe('VALIDATION_ERROR');
   });
 
-  it.each(['José da Silva', "D'Angelo", 'Anne-Marie', 'Ana 🌟', '李小龙'])(
-    'holder name %j is accepted as typed',
-    async (holderName) => {
-      const res = await post({ holderName, document: randomDocument() });
-      expect(res.statusCode).toBe(201);
-      expect(res.json().holderName).toBe(holderName);
-    },
-  );
+  it.each([
+    'José da Silva',
+    "D'Angelo",
+    'Anne-Marie',
+    'Ana 🌟',
+    '李小龙',
+    '\u0639\u0644\u06cc\u200c\u0631\u0636\u0627', // Persian with a zero-width non-joiner (ZWNJ)
+    'Ana \u{1F469}\u200d\u{1F4BB}', // zero-width joiner (ZWJ) sequence
+  ])('holder name %j is accepted as typed', async (holderName) => {
+    const res = await post({ holderName, document: randomDocument() });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().holderName).toBe(holderName);
+  });
 
   it.each([
     [' ', ''],

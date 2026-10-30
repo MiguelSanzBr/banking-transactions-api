@@ -52,7 +52,8 @@ export async function withTransaction<T>(
   const c = await pool.connect();
   let broken: Error | undefined;
   try {
-    await c.query('BEGIN');
+    // Pinned: the ON CONFLICT re-reads must see rows committed after BEGIN (REPEATABLE READ makes every race a 503).
+    await c.query('BEGIN ISOLATION LEVEL READ COMMITTED');
     const result = await fn(c);
     await c.query('COMMIT');
     return result;

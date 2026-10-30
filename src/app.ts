@@ -32,6 +32,9 @@ export async function buildApp(opts: { pool: pg.Pool; logger?: FastifyServerOpti
     // exists yet; add a clientErrorHandler writing a raw envelope when a client must parse every error body.
     frameworkErrors: (err, req, reply) =>
       errorHandler(err, req, reply.header('x-correlation-id', req.id)),
+    requestTimeout: 30_000, // a client that stops mid-body would otherwise hold its connection forever
+    // Node cuts an unfinished request at the larger of the two timeouts; its 60 s headers default would win.
+    http: { headersTimeout: 30_000 },
   });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);

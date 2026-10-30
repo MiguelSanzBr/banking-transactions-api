@@ -96,6 +96,43 @@ describe('request logs', () => {
     );
     expect(JSON.stringify(logs())).not.toContain('12345678901');
   });
+
+  it('an invalid Idempotency-Key is flagged on the 4xx line, never copied into it', async () => {
+    const { logged, logs } = await loggedApp();
+    const res = await logged.inject({
+      method: 'POST',
+      url: '/transfers',
+      headers: { 'idempotency-key': `has space ${'x'.repeat(300)}` },
+      payload: { sourceAccountId: randomUUID(), destinationAccountId: randomUUID(), amount: 1 },
+    });
+    await logged.close();
+    expect(res.statusCode).toBe(400);
+    const rejected = logs().find((l) => l.msg === 'request rejected');
+    expect(rejected).toMatchObject({ code: 'VALIDATION_ERROR', idempotencyKeyInvalid: true });
+    expect(rejected).not.toHaveProperty('idempotencyKey');
+    expect(JSON.stringify(logs())).not.toContain('has space');
+  });
+
+  it.each([
+    ['valid', 'retry-key-1', { idempotencyKey: 'retry-key-1' }],
+    ['invalid', 'has space', { idempotencyKeyInvalid: true }],
+  ])('the 5xx line follows the same Idempotency-Key rule (%s key)', async (_, key, fields) => {
+    const { logged, logs } = await loggedApp();
+    logged.get('/t/boom', async () => {
+      throw new Error('boom');
+    });
+    const res = await logged.inject({
+      method: 'GET',
+      url: '/t/boom',
+      headers: { 'idempotency-key': key },
+    });
+    await logged.close();
+    expect(res.statusCode).toBe(500);
+    expect(logs()).toContainEqual(
+      expect.objectContaining({ level: 50, msg: 'request failed', ...fields }),
+    );
+    expect(JSON.stringify(logs())).not.toContain('has space');
+  });
 });
 
 describe('readiness on any failure', () => {
@@ -170,8 +207,8 @@ describe('error envelope', () => {
       testApp.get<{ Params: { code: string } }>('/t/pg/:code', async (req) => {
         throw pgError(req.params.code);
       });
-      testApp.get('/t/not-queryable', async () => {
-        throw new Error('Client has encountered a connection error and is not queryable');
+      testApp.get<{ Querystring: { message: string } }>('/t/no-code', async (req) => {
+        throw new Error(req.query.message);
       });
     });
     afterAll(() => testApp.close());
@@ -281,8 +318,11 @@ describe('error envelope', () => {
       await lost.end();
     });
 
-    it('a client whose connection died ("not queryable", no code) → 503', async () => {
-      const res = await testApp.inject({ method: 'GET', url: '/t/not-queryable' });
+    it.each([
+      'Client has encountered a connection error and is not queryable', // the connection had already died
+      'Connection terminated unexpectedly', // the connection dropped mid-query
+    ])('pg error without a code "%s" → 503', async (message) => {
+      const res = await testApp.inject({ method: 'GET', url: '/t/no-code', query: { message } });
       expect(res.statusCode).toBe(503);
       expect(res.headers['retry-after']).toBe('1');
       expect(res.json().code).toBe('SERVICE_UNAVAILABLE');

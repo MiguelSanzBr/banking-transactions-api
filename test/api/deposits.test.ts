@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { setTimeout } from 'node:timers/promises';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { balanceOf, depositTo, makeApp, newAccount, setStatus } from '../helpers.js';
+import { balanceOf, depositTo, makeApp, newAccount, setStatus, waitForQueue } from '../helpers.js';
 
 let app: FastifyInstance;
 let pool: pg.Pool;
@@ -175,13 +174,19 @@ describe('deposit idempotency', () => {
     const key = randomUUID();
     // Hold the account lock so all 5 pass the (empty) key lookup and queue on FOR UPDATE: forces the ON CONFLICT path.
     const holder = await pool.connect();
-    await holder.query('BEGIN');
-    await holder.query('SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE', [a]);
-    const pending = Array.from({ length: 5 }, () => post(a, { amount: 100 }, key));
-    await setTimeout(300);
-    await holder.query('COMMIT');
-    holder.release();
-    const results = await Promise.all(pending);
+    let results: Awaited<ReturnType<typeof post>>[];
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE', [a]);
+      const { rows } = await holder.query('SELECT pg_backend_pid() AS pid');
+      const pending = Promise.all(Array.from({ length: 5 }, () => post(a, { amount: 100 }, key)));
+      await waitForQueue(pool, rows[0].pid, 5);
+      await holder.query('COMMIT');
+      results = await pending;
+    } finally {
+      await holder.query('ROLLBACK').catch(() => {}); // no-op after COMMIT
+      holder.release();
+    }
     expect(results.map((r) => r.statusCode)).toEqual([201, 201, 201, 201, 201]);
     expect(new Set(results.map((r) => r.json().id)).size).toBe(1);
     expect(results.filter((r) => r.headers['idempotent-replayed'] === 'true')).toHaveLength(4);

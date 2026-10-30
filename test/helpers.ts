@@ -1,6 +1,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { expect, inject } from 'vitest';
+import type pg from 'pg';
+import { expect, inject, vi } from 'vitest';
 import type { AccountStatus } from '../src/accounts/rules.js';
 import { buildApp } from '../src/app.js';
 import { createPool } from '../src/db.js';
@@ -64,3 +65,22 @@ export const postTransfer = (
     headers: { 'content-type': 'application/json', 'idempotency-key': key },
     payload: body,
   });
+
+// Resolves once `n` backends wait on the locks `holderPid` holds. Postgres queues row-lock waiters behind
+// each other, so the chain is followed back to the holder.
+export async function waitForQueue(pool: pg.Pool, holderPid: number, n: number) {
+  await vi.waitFor(
+    async () => {
+      const { rows } = await pool.query(
+        `WITH RECURSIVE waiting(pid) AS (
+           SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+           UNION
+           SELECT s.pid FROM pg_stat_activity s JOIN waiting w ON w.pid = ANY(pg_blocking_pids(s.pid))
+         ) SELECT count(*)::int AS n FROM waiting`,
+        [holderPid],
+      );
+      expect(rows[0].n).toBe(n);
+    },
+    { timeout: 3000, interval: 20 },
+  );
+}

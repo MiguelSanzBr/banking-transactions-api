@@ -52,10 +52,12 @@ describe('parseAmount', () => {
       ),
   );
 
-  it('parseAmount(1e-7) → 400 VALIDATION_ERROR', () =>
-    expect(() => parseAmount(1e-7)).toThrow(
+  // 0.1 + 0.2 is 0.30000000000000004: more than 2 decimals, never rounded to 0.30.
+  it.each([0.1 + 0.2, 1e-7])('parseAmount(%s) → 400 VALIDATION_ERROR', (v) =>
+    expect(() => parseAmount(v)).toThrow(
       expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }),
-    ));
+    ),
+  );
 
   it('at max is ok', () => expect(parseAmount(1_000_000_000)).toBe(100_000_000_000));
 });

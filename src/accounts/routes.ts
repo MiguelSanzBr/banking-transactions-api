@@ -16,12 +16,13 @@ const createBody = z.strictObject({
     .trim()
     .min(1)
     .max(120)
+    // Bidi controls (U+202A to U+202E, U+2066 to U+2069) can make a rendered name read differently; ZWJ/ZWNJ stay (real names use them).
     .refine(
-      (s) => !/[\p{Cc}\p{Cs}\uFFFD]/u.test(s) && /\p{L}/u.test(s),
+      (s) => !/[\p{Cc}\p{Cs}\uFFFD\u202A-\u202E\u2066-\u2069]/u.test(s) && /\p{L}/u.test(s),
       'must contain a letter and no control or invalid characters',
     )
     .describe(
-      '1 to 120 characters with at least one letter; no control characters, lone surrogates or U+FFFD',
+      '1 to 120 characters with at least one letter; no control characters, bidi controls, lone surrogates or U+FFFD',
     ),
   document: z
     .string()

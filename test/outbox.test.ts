@@ -15,6 +15,7 @@ const dbUrl = new URL('/outbox_test', inject('databaseUrl')).href;
 
 beforeAll(async () => {
   const admin = createPool(inject('databaseUrl'));
+  await admin.query('DROP DATABASE IF EXISTS outbox_test'); // left by the previous run in watch mode
   await admin.query('CREATE DATABASE outbox_test');
   await admin.end();
   pool = createPool(dbUrl, { max: 20 });
@@ -225,5 +226,31 @@ describe('outbox relay', () => {
     await stop();
     // The first round starts after one interval; at one batch of 50 per interval, 120 events need three.
     expect(elapsed).toBeLessThan(2000);
+  });
+
+  it('a batch that only fails is retried once per interval, not right away', async () => {
+    // A full batch: a relay that re-ran whenever it fetched rows (or a full batch) would spin on it.
+    const mine = new Set<string>();
+    for (let i = 0; i < 50; i++) mine.add((await addEvent()).aggregateId);
+    const [first] = mine;
+    const tries: number[] = []; // when `first` was attempted
+    let thirdTry!: () => void;
+    const triedThrice = new Promise<void>((resolve) => {
+      thirdTry = resolve;
+    });
+    const stop = startRelay(
+      pool,
+      async (e) => {
+        if (!mine.has(e.aggregateId)) return;
+        if (e.aggregateId === first && tries.push(performance.now()) === 3) thirdTry();
+        throw new Error('broker down');
+      },
+      250,
+      app.log,
+    );
+    await triedThrice;
+    await stop();
+    const [t1, t2, t3] = tries as [number, number, number];
+    expect(Math.min(t2 - t1, t3 - t2)).toBeGreaterThanOrEqual(240);
   });
 });

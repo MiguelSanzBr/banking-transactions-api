@@ -10,7 +10,8 @@ export const uuidParam = <K extends string>(name: K) =>
 
 // Fastify lowercases header names. z.object strips unknown keys, so other headers pass.
 const KEY_MESSAGE = 'Idempotency-Key must be 1 to 255 visible ASCII characters (no spaces)';
-const key = z.string(KEY_MESSAGE).regex(/^[\x21-\x7E]{1,255}$/, KEY_MESSAGE);
+export const IDEMPOTENCY_KEY = /^[\x21-\x7E]{1,255}$/;
+const key = z.string(KEY_MESSAGE).regex(IDEMPOTENCY_KEY, KEY_MESSAGE);
 export const idempotencyKeyHeader = z.object({ 'idempotency-key': key });
 export const optionalIdempotencyKeyHeader = z.object({ 'idempotency-key': key.optional() });
 

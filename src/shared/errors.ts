@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { hasZodFastifySchemaValidationErrors } from 'fastify-type-provider-zod';
+import { IDEMPOTENCY_KEY } from './schemas.js';
 
 export type ErrorCode =
   | 'VALIDATION_ERROR'
@@ -65,6 +66,15 @@ export function loggable(err: unknown) {
   return { name, message, code, stack };
 }
 
+// The header is raw client input (any length, maybe a document): logged only when it has the key format.
+function keyFields(req: FastifyRequest) {
+  const key = req.headers['idempotency-key'];
+  if (key === undefined) return {};
+  return typeof key === 'string' && IDEMPOTENCY_KEY.test(key)
+    ? { idempotencyKey: key }
+    : { idempotencyKeyInvalid: true };
+}
+
 // Every error response goes out here. A 4xx is logged at info so an operator can explain it from the
 // correlationId: code, status and Idempotency-Key, never the body (it can hold the document).
 function sendError(
@@ -75,11 +85,7 @@ function sendError(
   message: string,
   extra = {},
 ) {
-  if (statusCode < 500)
-    req.log.info(
-      { code, statusCode, idempotencyKey: req.headers['idempotency-key'] },
-      'request rejected',
-    );
+  if (statusCode < 500) req.log.info({ code, statusCode, ...keyFields(req) }, 'request rejected');
   if (statusCode === 503) reply.header('retry-after', '1');
   return reply
     .status(statusCode)
@@ -115,7 +121,7 @@ export function errorHandler(err: unknown, req: FastifyRequest, reply: FastifyRe
       );
     return sendError(req, reply, 400, 'VALIDATION_ERROR', 'Malformed request');
   }
-  req.log.error({ err: loggable(err) }, 'request failed');
+  req.log.error({ err: loggable(err), ...keyFields(req) }, 'request failed');
   // SQLSTATE class 08 is "connection exception".
   const connectionLost = String(code).startsWith('08');
   if (RETRYABLE.has(String(code)) || connectionLost || POOL_FAILURE.test(String(message)))
