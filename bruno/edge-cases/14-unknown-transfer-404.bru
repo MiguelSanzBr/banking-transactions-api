@@ -1,0 +1,17 @@
+meta {
+  name: Unknown transfer -> 404
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/transfers/00000000-0000-4000-8000-000000000000
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 404
+  res.body.code: eq TRANSFER_NOT_FOUND
+  res.body.correlationId: isString
+}

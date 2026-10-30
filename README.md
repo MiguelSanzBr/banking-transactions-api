@@ -47,7 +47,7 @@ Os testes de API chamam a aplicação real (`app.inject`) contra um Postgres de 
 
 ## 3. Consumindo a API
 
-Swagger UI em `/docs`, gerado dos mesmos schemas Zod que validam as requisições (não diverge do código). Dinheiro trafega como `number` em reais (`"amount": 250.00`) e datas em ISO 8601 UTC. Rotas: `POST /accounts`, `GET /accounts/{id}`, `PATCH /accounts/{id}/status`, `POST /accounts/{id}/deposits`, `POST /transfers`, `GET /transfers/{id}`, `GET /accounts/{id}/statement?from&to&limit&cursor`, `GET /health`, `GET /ready`.
+Swagger UI em `/docs`, gerado dos mesmos schemas Zod que validam as requisições (não diverge do código). Dinheiro trafega como `number` em reais (`"amount": 250.00`) e datas em ISO 8601 UTC. Rotas: `POST /accounts`, `GET /accounts/{id}`, `PATCH /accounts/{id}/status`, `POST /accounts/{id}/deposits`, `POST /transfers`, `GET /transfers/{id}`, `GET /accounts/{id}/statement?from&to&limit&cursor`, `GET /health`, `GET /ready`. A pasta `bruno/` é uma coleção do [Bruno](https://www.usebruno.com) com todas elas (abra a pasta, escolha o ambiente `local` e rode a coleção em ordem: os requests passam ids de um para o outro por variáveis).
 
 Roteiro com `curl` (bash ou zsh, não `sh`; precisa de `jq`; a API tem que estar no ar):
 

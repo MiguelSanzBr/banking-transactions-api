@@ -1,0 +1,26 @@
+meta {
+  name: Deposit 100.50 into B (no Idempotency-Key)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/accounts/{{accountB}}/deposits
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "amount": 100.50
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.amount: eq 100.5
+}
+
+docs {
+  The key is optional on deposits, but without it a retry after a 503 can credit twice.
+}

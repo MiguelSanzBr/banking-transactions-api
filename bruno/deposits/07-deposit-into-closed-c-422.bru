@@ -1,0 +1,23 @@
+meta {
+  name: Deposit into closed C -> 422
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/accounts/{{accountC}}/deposits
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "amount": 10.00
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.code: eq ACCOUNT_CLOSED
+  res.body.correlationId: isString
+}

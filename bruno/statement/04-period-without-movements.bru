@@ -1,0 +1,22 @@
+meta {
+  name: Period without movements
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/accounts/{{accountA}}/statement?from=2000-01-01&to=2000-01-02
+  body: none
+  auth: none
+}
+
+params:query {
+  from: 2000-01-01
+  to: 2000-01-02
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: length 0
+  res.body.nextCursor: isNull
+}

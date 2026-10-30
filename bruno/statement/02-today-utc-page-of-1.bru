@@ -1,0 +1,41 @@
+meta {
+  name: Today (UTC), page of 1
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/accounts/{{accountA}}/statement?from={{today}}&to={{today}}&limit=1
+  body: none
+  auth: none
+}
+
+params:query {
+  from: {{today}}
+  to: {{today}}
+  limit: 1
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: length 1
+  res.body.nextCursor: isString
+}
+
+script:pre-request {
+  bru.setVar("today", new Date().toISOString().slice(0, 10));
+}
+
+script:post-response {
+  bru.setVar("cursor", res.body.nextCursor);
+}
+
+tests {
+  test("first page is the deposit", function () {
+    expect(res.body.items[0].type).to.equal("DEPOSIT");
+  });
+}
+
+docs {
+  `to` includes the whole day (UTC). Run it right after "Create account A" if the run crosses midnight UTC.
+}

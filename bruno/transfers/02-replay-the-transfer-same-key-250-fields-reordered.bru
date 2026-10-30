@@ -1,0 +1,42 @@
+meta {
+  name: Replay the transfer (same key, 250, fields reordered)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/transfers
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: abc123-{{run}}
+}
+
+body:json {
+  {
+    "amount": 250,
+    "destinationAccountId": "{{accountB}}",
+    "sourceAccountId": "{{accountA}}"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.status: eq COMPLETED
+}
+
+tests {
+  test("same transfer as the original", function () {
+    expect(res.body.id).to.equal(bru.getVar("transferId"));
+  });
+
+  test("is an idempotent replay", function () {
+    expect(res.getHeader("idempotent-replayed")).to.equal("true");
+  });
+}
+
+docs {
+  The payload is compared by normalized fields, not by the raw body: this is a replay, A is debited once.
+}

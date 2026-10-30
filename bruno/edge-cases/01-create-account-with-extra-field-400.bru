@@ -1,0 +1,25 @@
+meta {
+  name: Create account with extra field -> 400
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/accounts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "holderName": "Ana Souza",
+    "document": "{{docA}}",
+    "balance": 1000000
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.code: eq VALIDATION_ERROR
+  res.body.correlationId: isString
+}

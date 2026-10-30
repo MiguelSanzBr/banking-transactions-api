@@ -1,0 +1,21 @@
+meta {
+  name: Statement with invalid cursor -> 400
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{baseUrl}}/accounts/{{accountA}}/statement?cursor=invalid
+  body: none
+  auth: none
+}
+
+params:query {
+  cursor: invalid
+}
+
+assert {
+  res.status: eq 400
+  res.body.code: eq VALIDATION_ERROR
+  res.body.correlationId: isString
+}

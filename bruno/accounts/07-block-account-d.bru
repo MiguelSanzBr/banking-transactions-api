@@ -1,0 +1,22 @@
+meta {
+  name: Block account D
+  type: http
+  seq: 7
+}
+
+patch {
+  url: {{baseUrl}}/accounts/{{accountD}}/status
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "BLOCKED"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq BLOCKED
+}

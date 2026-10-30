@@ -1,0 +1,25 @@
+meta {
+  name: text/plain body -> 415
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/accounts
+  body: text
+  auth: none
+}
+
+headers {
+  Content-Type: text/plain
+}
+
+body:text {
+  holderName=Ana
+}
+
+assert {
+  res.status: eq 415
+  res.body.code: eq UNSUPPORTED_MEDIA_TYPE
+  res.body.correlationId: isString
+}

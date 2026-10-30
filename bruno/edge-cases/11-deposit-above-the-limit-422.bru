@@ -1,0 +1,23 @@
+meta {
+  name: Deposit above the limit -> 422
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/accounts/{{accountA}}/deposits
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "amount": 1000000000.01
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.code: eq AMOUNT_LIMIT_EXCEEDED
+  res.body.correlationId: isString
+}

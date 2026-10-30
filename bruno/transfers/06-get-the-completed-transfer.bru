@@ -1,0 +1,23 @@
+meta {
+  name: Get the completed transfer
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/transfers/{{transferId}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq COMPLETED
+  res.body.amount: eq 250
+}
+
+tests {
+  test("returns the transfer", function () {
+    expect(res.body.id).to.equal(bru.getVar("transferId"));
+  });
+}

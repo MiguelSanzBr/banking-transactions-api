@@ -1,0 +1,17 @@
+meta {
+  name: Unknown account -> 404
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/accounts/00000000-0000-4000-8000-000000000000
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 404
+  res.body.code: eq ACCOUNT_NOT_FOUND
+  res.body.correlationId: isString
+}

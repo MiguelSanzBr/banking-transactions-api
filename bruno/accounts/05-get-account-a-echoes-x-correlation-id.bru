@@ -1,0 +1,30 @@
+meta {
+  name: Get account A (echoes X-Correlation-Id)
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/accounts/{{accountA}}
+  body: none
+  auth: none
+}
+
+headers {
+  X-Correlation-Id: bruno-{{run}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq ACTIVE
+}
+
+tests {
+  test("returns account A", function () {
+    expect(res.body.id).to.equal(bru.getVar("accountA"));
+  });
+
+  test("echoes the correlation id", function () {
+    expect(res.getHeader("x-correlation-id")).to.equal("bruno-" + bru.getVar("run"));
+  });
+}

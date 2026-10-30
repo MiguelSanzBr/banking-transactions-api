@@ -1,0 +1,27 @@
+meta {
+  name: Reopen closed account C -> 422
+  type: http
+  seq: 9
+}
+
+patch {
+  url: {{baseUrl}}/accounts/{{accountC}}/status
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "ACTIVE"
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.code: eq ACCOUNT_CLOSED
+  res.body.correlationId: isString
+}
+
+docs {
+  CLOSED is terminal.
+}

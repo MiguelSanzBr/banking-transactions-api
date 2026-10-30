@@ -1,0 +1,39 @@
+meta {
+  name: Replay the failed transfer -> same 422
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/transfers
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: def456-{{run}}
+}
+
+body:json {
+  {
+    "sourceAccountId": "{{accountA}}",
+    "destinationAccountId": "{{accountB}}",
+    "amount": 1000.00
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.code: eq INSUFFICIENT_BALANCE
+  res.body.correlationId: isString
+}
+
+tests {
+  test("same transferId as the original", function () {
+    expect(res.body.transferId).to.equal(bru.getVar("failedTransferId"));
+  });
+
+  test("is an idempotent replay", function () {
+    expect(res.getHeader("idempotent-replayed")).to.equal("true");
+  });
+}

@@ -1,0 +1,30 @@
+meta {
+  name: Next page (cursor from the previous page)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/accounts/{{accountA}}/statement?from={{today}}&to={{today}}&limit=1&cursor={{cursor}}
+  body: none
+  auth: none
+}
+
+params:query {
+  from: {{today}}
+  to: {{today}}
+  limit: 1
+  cursor: {{cursor}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: length 1
+}
+
+tests {
+  test("second page has the first transfer, no repeat", function () {
+    expect(res.body.items[0].type).to.equal("TRANSFER_OUT");
+    expect(res.body.items[0].amount).to.equal(250);
+  });
+}

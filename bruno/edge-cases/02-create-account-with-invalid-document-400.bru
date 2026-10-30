@@ -1,0 +1,24 @@
+meta {
+  name: Create account with invalid document -> 400
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/accounts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "holderName": "Ana Souza",
+    "document": "123"
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.code: eq VALIDATION_ERROR
+  res.body.correlationId: isString
+}

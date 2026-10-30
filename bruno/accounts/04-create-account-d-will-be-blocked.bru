@@ -1,0 +1,26 @@
+meta {
+  name: Create account D (will be blocked)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/accounts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "holderName": "Davi Rocha",
+    "document": "{{docD}}"
+  }
+}
+
+assert {
+  res.status: eq 201
+}
+
+script:post-response {
+  bru.setVar("accountD", res.body.id);
+}
