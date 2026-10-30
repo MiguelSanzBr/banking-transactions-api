@@ -13,7 +13,8 @@ CREATE TABLE deposits (
   account_id      uuid NOT NULL REFERENCES accounts(id),
   amount_cents    bigint NOT NULL CHECK (amount_cents > 0),
   idempotency_key text UNIQUE,
-  created_at      timestamptz NOT NULL DEFAULT now()
+  -- Milliseconds, like a JS Date: the ledger row gets this value back through one and must match it exactly.
+  created_at      timestamptz NOT NULL DEFAULT date_trunc('milliseconds', clock_timestamp())
 );
 
 CREATE TABLE transfers (
@@ -24,7 +25,8 @@ CREATE TABLE transfers (
   amount_cents           bigint NOT NULL CHECK (amount_cents > 0),
   status                 text NOT NULL CHECK (status IN ('COMPLETED','FAILED')),
   failure_code           text,
-  created_at             timestamptz NOT NULL DEFAULT now(),
+  -- Milliseconds, like a JS Date: the ledger rows get this value back through one and must match it exactly.
+  created_at             timestamptz NOT NULL DEFAULT date_trunc('milliseconds', clock_timestamp()),
   CHECK (source_account_id <> destination_account_id),
   CHECK ((status = 'FAILED') = (failure_code IS NOT NULL))
 );

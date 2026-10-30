@@ -66,6 +66,7 @@ export async function transfers(app: FastifyInstance, opts: { pool: pg.Pool }) {
         destinationAccountId: req.body.destinationAccountId,
         amountCents: parseAmount(req.body.amount),
         idempotencyKey,
+        correlationId: req.id,
       });
       req.log.info(
         {

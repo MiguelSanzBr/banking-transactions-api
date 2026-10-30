@@ -60,9 +60,16 @@ export function deposit(
       `UPDATE accounts SET balance_cents = balance_cents + $2, updated_at = now() WHERE id = $1 RETURNING balance_cents AS balance`,
       [accountId, amountCents],
     );
+    // The deposit's own timestamp, so the response and the statement show the same instant.
     await c.query(
-      `INSERT INTO ledger_entries (account_id, type, amount_cents, balance_after_cents, deposit_id) VALUES ($1, 'DEPOSIT', $2, $3, $4)`,
-      [accountId, amountCents, updated.rows[0]?.balance, inserted.rows[0].id],
+      `INSERT INTO ledger_entries (account_id, type, amount_cents, balance_after_cents, deposit_id, created_at) VALUES ($1, 'DEPOSIT', $2, $3, $4, $5)`,
+      [
+        accountId,
+        amountCents,
+        updated.rows[0]?.balance,
+        inserted.rows[0].id,
+        inserted.rows[0].createdAt,
+      ],
     );
     return { deposit: inserted.rows[0], replayed: false };
   });

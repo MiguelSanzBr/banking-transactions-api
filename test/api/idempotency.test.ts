@@ -108,6 +108,29 @@ describe('transfer idempotency', () => {
     ]);
   });
 
+  it('same key, different source → 422 IDEMPOTENCY_KEY_REUSED', async () => {
+    const { a, b } = await funded(100);
+    const c = await newAccount(app);
+    await depositTo(app, c, 100);
+    const key = newKey();
+    const first = await postTransfer(
+      app,
+      { sourceAccountId: a, destinationAccountId: b, amount: 30 },
+      key,
+    );
+    expect(first.statusCode).toBe(201);
+    const reused = await postTransfer(
+      app,
+      { sourceAccountId: c, destinationAccountId: b, amount: 30 },
+      key,
+    );
+    expect(reused.statusCode).toBe(422);
+    expect(reused.json().code).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect([await balanceOf(app, a), await balanceOf(app, b), await balanceOf(app, c)]).toEqual([
+      70, 30, 100,
+    ]);
+  });
+
   it('replay of a FAILED transfer stays FAILED even after the account is funded', async () => {
     const { a, b } = await funded(0);
     const key = newKey();

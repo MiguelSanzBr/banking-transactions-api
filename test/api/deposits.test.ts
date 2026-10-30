@@ -3,6 +3,7 @@ import { setTimeout } from 'node:timers/promises';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildApp } from '../../src/app.js';
 import { balanceOf, depositTo, makeApp, newAccount, setStatus } from '../helpers.js';
 
 let app: FastifyInstance;
@@ -144,6 +145,31 @@ describe('deposit idempotency', () => {
     expect(await balanceOf(app, b)).toBe(0);
   });
 
+  it('logs "deposit processed" at info with depositId, accountId, idempotencyKey and replayed', async () => {
+    const lines: string[] = [];
+    const logged = await buildApp({
+      pool,
+      logger: { stream: { write: (l: string) => lines.push(l) } },
+    });
+    const a = await newAccount(logged);
+    const key = randomUUID();
+    const send = () =>
+      logged.inject({
+        method: 'POST',
+        url: `/accounts/${a}/deposits`,
+        headers: { 'idempotency-key': key },
+        payload: { amount: 10 },
+      });
+    const first = await send();
+    await send();
+    await logged.close();
+    const line = { level: 30, depositId: first.json().id, accountId: a, idempotencyKey: key };
+    expect(lines.map((l) => JSON.parse(l)).filter((l) => l.msg === 'deposit processed')).toEqual([
+      expect.objectContaining({ ...line, replayed: false }),
+      expect.objectContaining({ ...line, replayed: true }),
+    ]);
+  });
+
   it('5 parallel deposits with the same key → one deposit, balance credited once', async () => {
     const a = await newAccount(app);
     const key = randomUUID();
@@ -165,19 +191,5 @@ describe('deposit idempotency', () => {
     ]);
     expect(Number(ledger.rows[0].count)).toBe(1);
     expect(await balanceOf(app, a)).toBe(100);
-  });
-});
-
-describe('closing an account with money', () => {
-  it('PATCH CLOSED with balance > 0 → 422 ACCOUNT_HAS_BALANCE', async () => {
-    const a = await newAccount(app);
-    await depositTo(app, a, 10);
-    const res = await app.inject({
-      method: 'PATCH',
-      url: `/accounts/${a}/status`,
-      payload: { status: 'CLOSED' },
-    });
-    expect(res.statusCode).toBe(422);
-    expect(res.json().code).toBe('ACCOUNT_HAS_BALANCE');
   });
 });

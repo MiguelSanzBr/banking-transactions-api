@@ -26,6 +26,7 @@ export function createTransfer(
     destinationAccountId: string;
     amountCents: number;
     idempotencyKey: string;
+    correlationId: string;
   },
 ): Promise<{ transfer: Transfer; replayed: boolean }> {
   const { sourceAccountId, destinationAccountId, amountCents, idempotencyKey } = input;
@@ -95,47 +96,53 @@ export function createTransfer(
       if (!winner) throw new Error('transfer insert conflicted but no row has its idempotency key');
       return winner;
     }
-    if (failureCode) return { transfer, replayed: false };
-
-    const move = (id: string, delta: number) =>
-      c.query<{ balance: number }>(
-        'UPDATE accounts SET balance_cents = balance_cents + $2, updated_at = now() WHERE id = $1 RETURNING balance_cents AS balance',
-        [id, delta],
-      );
-    const debited = await move(sourceAccountId, -amountCents);
-    const credited = await move(destinationAccountId, amountCents);
-    await c.query(
-      `INSERT INTO ledger_entries (account_id, type, amount_cents, balance_after_cents, transfer_id)
-       VALUES ($1, 'TRANSFER_OUT', $3, $4, $6), ($2, 'TRANSFER_IN', $3, $5, $6)`,
-      [
-        sourceAccountId,
-        destinationAccountId,
-        amountCents,
-        debited.rows[0]?.balance,
-        credited.rows[0]?.balance,
-        transfer.id,
-      ],
-    );
-    // Same transaction as the balance change: the event exists if and only if the money moved.
-    const eventId = randomUUID();
-    await c.query(
-      `INSERT INTO outbox_events (id, event_type, aggregate_id, payload) VALUES ($1, 'TransferCompleted', $2, $3)`,
-      [
-        eventId,
-        transfer.id,
-        {
-          eventId,
-          eventType: 'TransferCompleted',
-          transferId: transfer.id,
-          sourceAccountId,
-          destinationAccountId,
-          amount: toAmount(amountCents),
-          occurredAt: transfer.createdAt.toISOString(),
-        },
-      ],
-    );
+    if (!failureCode) await moveMoney(c, transfer, input.correlationId);
     return { transfer, replayed: false };
   });
+}
+
+// A COMPLETED transfer's writes, run while createTransfer holds both account locks.
+async function moveMoney(c: pg.PoolClient, t: Transfer, correlationId: string): Promise<void> {
+  const { id, sourceAccountId, destinationAccountId, amountCents, createdAt } = t;
+  const move = async (accountId: string, delta: number) => {
+    const { rows } = await c.query<{ balance: number }>(
+      'UPDATE accounts SET balance_cents = balance_cents + $2, updated_at = now() WHERE id = $1 RETURNING balance_cents AS balance',
+      [accountId, delta],
+    );
+    return rows[0]?.balance;
+  };
+  const debited = await move(sourceAccountId, -amountCents);
+  const credited = await move(destinationAccountId, amountCents);
+
+  // One row per side, values in column order. The transfer's own timestamp, so the response, the event and the
+  // statement show the same instant. One statement, not two: every round trip here is spent holding the locks.
+  const debit = [sourceAccountId, 'TRANSFER_OUT', amountCents, debited, id, createdAt];
+  const credit = [destinationAccountId, 'TRANSFER_IN', amountCents, credited, id, createdAt];
+  await c.query(
+    `INSERT INTO ledger_entries (account_id, type, amount_cents, balance_after_cents, transfer_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $10, $11, $12)`,
+    [...debit, ...credit],
+  );
+
+  // Same transaction as the balance change: the event exists if and only if the money moved.
+  const eventId = randomUUID();
+  await c.query(
+    `INSERT INTO outbox_events (id, event_type, aggregate_id, payload) VALUES ($1, 'TransferCompleted', $2, $3)`,
+    [
+      eventId,
+      id,
+      {
+        eventId,
+        eventType: 'TransferCompleted',
+        transferId: id,
+        sourceAccountId,
+        destinationAccountId,
+        amount: toAmount(amountCents),
+        occurredAt: createdAt.toISOString(),
+        correlationId, // lets a consumer trace the event back to the request
+      },
+    ],
+  );
 }
 
 // Single statement: no transaction needed.

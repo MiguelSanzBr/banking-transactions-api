@@ -6,14 +6,33 @@ import { toAmount } from '../shared/money.js';
 import { errorResponses, uuidParam } from '../shared/schemas.js';
 import { getStatement } from './service.js';
 
+const encodeCursor = (id: number) => Buffer.from(String(id)).toString('base64url');
+
+// The cursor is the base64url of the last ledger id. Buffer decoding is lenient ("@@" decodes to nothing), so only a
+// value that re-encodes to the same cursor passes; at most 18 digits keeps it inside bigint (a 400, never a 22003).
+const cursor = z.string().transform((c, ctx) => {
+  const id = Buffer.from(c, 'base64url').toString();
+  if (/^\d{1,18}$/.test(id) && encodeCursor(Number(id)) === c) return Number(id);
+  ctx.addIssue({ code: 'custom', message: 'cursor is invalid' });
+  return z.NEVER;
+});
+
 // z.iso.date() checks the calendar (2026-02-30 and 2026-13-01 fail), so no Date round trip is needed here.
 // YYYY-MM-DD strings sort like dates, hence the plain string comparison.
 const query = z
   .object({
     from: z.iso.date().optional(),
     to: z.iso.date().optional(),
-    limit: z.coerce.number().int().min(1).max(100).default(50),
-    cursor: z.string().optional(),
+    // Plain digits only: z.coerce.number() would also take "1e1", "0x10" and " 5". The pipe hides the range and the
+    // default from /docs, hence the description.
+    limit: z
+      .string()
+      .regex(/^\d+$/)
+      .transform(Number)
+      .pipe(z.number().min(1).max(100))
+      .default(50)
+      .meta({ description: 'Page size, 1 to 100 (default 50)' }),
+    cursor: cursor.optional(),
   })
   .refine((q) => !q.from || !q.to || q.from <= q.to, { message: 'from must not be after to' });
 
@@ -59,7 +78,7 @@ export async function statement(app: FastifyInstance, opts: { pool: pg.Pool }) {
         from: from ?? null,
         to: to ?? null,
         items: page.items.map((i) => ({
-          id: i.id,
+          id: String(i.id),
           type: i.type,
           amount: toAmount(i.amountCents),
           balanceAfter: toAmount(i.balanceAfterCents),
@@ -67,7 +86,7 @@ export async function statement(app: FastifyInstance, opts: { pool: pg.Pool }) {
           depositId: i.depositId,
           createdAt: i.createdAt.toISOString(),
         })),
-        nextCursor: page.nextCursor,
+        nextCursor: page.nextCursor === null ? null : encodeCursor(page.nextCursor),
       };
     },
   );
