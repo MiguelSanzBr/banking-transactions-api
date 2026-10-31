@@ -93,6 +93,14 @@ describe('POST /accounts/:accountId/deposits', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('VALIDATION_ERROR');
   });
+
+  it('valid body plus an extra field → 400 VALIDATION_ERROR, nothing credited', async () => {
+    const a = await newAccount(app);
+    const res = await post(a, { amount: 10, foo: 1 });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('VALIDATION_ERROR');
+    expect(await balanceOf(app, a)).toBe(0);
+  });
 });
 
 describe('deposit idempotency', () => {
