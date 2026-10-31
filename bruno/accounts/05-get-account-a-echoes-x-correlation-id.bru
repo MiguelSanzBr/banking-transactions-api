@@ -21,10 +21,10 @@ assert {
 
 tests {
   test("returns account A", function () {
-    expect(res.body.id).to.equal(bru.getVar("accountA"));
+    expect(res.body.id).to.equal(bru.getEnvVar("accountA"));
   });
 
   test("echoes the correlation id", function () {
-    expect(res.getHeader("x-correlation-id")).to.equal("bruno-" + bru.getVar("run"));
+    expect(res.getHeader("x-correlation-id")).to.equal("bruno-" + bru.getEnvVar("run"));
   });
 }

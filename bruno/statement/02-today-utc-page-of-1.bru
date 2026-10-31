@@ -23,11 +23,11 @@ assert {
 }
 
 script:pre-request {
-  bru.setVar("today", new Date().toISOString().slice(0, 10));
+  bru.setEnvVar("today", new Date().toISOString().slice(0, 10));
 }
 
 script:post-response {
-  bru.setVar("cursor", res.body.nextCursor);
+  bru.setEnvVar("cursor", res.body.nextCursor);
 }
 
 tests {

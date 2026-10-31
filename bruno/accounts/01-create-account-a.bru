@@ -29,22 +29,22 @@ script:pre-request {
   const run = String(Date.now());
   const digits = run.slice(-10);
   const mask = (d) => d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
-  bru.setVar("run", run);
-  bru.setVar("docA", digits + "1");
-  bru.setVar("docB", digits + "2");
-  bru.setVar("docC", digits + "3");
-  bru.setVar("docD", digits + "4");
-  bru.setVar("docAMasked", mask(digits + "1"));
-  bru.setVar("docBMasked", mask(digits + "2"));
+  bru.setEnvVar("run", run);
+  bru.setEnvVar("docA", digits + "1");
+  bru.setEnvVar("docB", digits + "2");
+  bru.setEnvVar("docC", digits + "3");
+  bru.setEnvVar("docD", digits + "4");
+  bru.setEnvVar("docAMasked", mask(digits + "1"));
+  bru.setEnvVar("docBMasked", mask(digits + "2"));
 }
 
 script:post-response {
-  bru.setVar("accountA", res.body.id);
+  bru.setEnvVar("accountA", res.body.id);
 }
 
 tests {
   test("document is stored as digits", function () {
-    expect(res.body.document).to.equal(bru.getVar("docA"));
+    expect(res.body.document).to.equal(bru.getEnvVar("docA"));
   });
 
   test("Location points to the new account", function () {

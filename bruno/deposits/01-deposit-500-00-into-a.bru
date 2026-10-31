@@ -26,12 +26,12 @@ assert {
 }
 
 script:post-response {
-  bru.setVar("depositId", res.body.id);
+  bru.setEnvVar("depositId", res.body.id);
 }
 
 tests {
   test("credited account A", function () {
-    expect(res.body.accountId).to.equal(bru.getVar("accountA"));
+    expect(res.body.accountId).to.equal(bru.getEnvVar("accountA"));
   });
 
   test("is not a replay", function () {

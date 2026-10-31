@@ -1,0 +1,9 @@
+docs {
+  # Banking Transactions API
+
+  Select the `local` environment and run the collection in order (folders and requests are numbered).
+
+  - `baseUrl`: the only variable you set. Change it if the API runs on another port (`API_PORT`).
+  - The other variables are filled by the scripts while the collection runs: `run` (suffix that keeps documents and Idempotency-Keys unique), `today`, `doc*`, `account*`, `depositId`, `transferId`, `failedTransferId`, `cursor`. They stay empty in the file and are not saved.
+  - "Create account A" must run first in each run: it generates `run` and the documents.
+}

@@ -18,6 +18,6 @@ assert {
 
 tests {
   test("returns the transfer", function () {
-    expect(res.body.id).to.equal(bru.getVar("transferId"));
+    expect(res.body.id).to.equal(bru.getEnvVar("transferId"));
   });
 }

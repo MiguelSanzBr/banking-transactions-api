@@ -30,7 +30,7 @@ assert {
 
 tests {
   test("same transferId as the original", function () {
-    expect(res.body.transferId).to.equal(bru.getVar("failedTransferId"));
+    expect(res.body.transferId).to.equal(bru.getEnvVar("failedTransferId"));
   });
 
   test("is an idempotent replay", function () {

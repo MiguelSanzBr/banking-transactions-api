@@ -27,7 +27,7 @@ assert {
 
 tests {
   test("same deposit as the original", function () {
-    expect(res.body.id).to.equal(bru.getVar("depositId"));
+    expect(res.body.id).to.equal(bru.getEnvVar("depositId"));
   });
 
   test("is an idempotent replay", function () {

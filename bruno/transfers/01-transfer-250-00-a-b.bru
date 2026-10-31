@@ -30,7 +30,7 @@ assert {
 }
 
 script:post-response {
-  bru.setVar("transferId", res.body.id);
+  bru.setEnvVar("transferId", res.body.id);
 }
 
 tests {

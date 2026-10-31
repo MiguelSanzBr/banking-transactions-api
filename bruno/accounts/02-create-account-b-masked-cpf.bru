@@ -23,11 +23,11 @@ assert {
 }
 
 script:post-response {
-  bru.setVar("accountB", res.body.id);
+  bru.setEnvVar("accountB", res.body.id);
 }
 
 tests {
   test("the mask is stripped", function () {
-    expect(res.body.document).to.equal(bru.getVar("docB"));
+    expect(res.body.document).to.equal(bru.getEnvVar("docB"));
   });
 }

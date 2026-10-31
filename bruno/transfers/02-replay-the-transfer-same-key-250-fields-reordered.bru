@@ -29,7 +29,7 @@ assert {
 
 tests {
   test("same transfer as the original", function () {
-    expect(res.body.id).to.equal(bru.getVar("transferId"));
+    expect(res.body.id).to.equal(bru.getEnvVar("transferId"));
   });
 
   test("is an idempotent replay", function () {
