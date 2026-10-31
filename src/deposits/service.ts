@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
+import type { AccountStatus } from '../accounts/rules.js';
 import { withTransaction } from '../db.js';
 import { AppError } from '../shared/errors.js';
+import { checkDeposit } from './rules.js';
 
 export type Deposit = { id: string; accountId: string; amountCents: number; createdAt: Date };
 
@@ -36,12 +38,12 @@ export function deposit(
     }
 
     // Lock before inserting: a missing account is a 404 with nothing written, not an FK violation.
-    const acc = await c.query<{ status: string }>(
+    const acc = await c.query<{ status: AccountStatus }>(
       'SELECT status FROM accounts WHERE id = $1 FOR UPDATE',
       [accountId],
     );
     if (!acc.rows[0]) throw new AppError(404, 'ACCOUNT_NOT_FOUND', 'Account not found');
-    if (acc.rows[0].status === 'CLOSED')
+    if (checkDeposit(acc.rows[0].status))
       throw new AppError(422, 'ACCOUNT_CLOSED', 'Account is closed');
 
     const inserted = await c.query<Deposit>(

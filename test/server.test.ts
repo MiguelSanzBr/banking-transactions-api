@@ -77,6 +77,9 @@ it('SIGTERM with a keep-alive request in flight → the request completes and th
     expect((await deposit).status).toBe(201);
     expect((await exited)[0]).toBe(0);
     expect(Date.now() - signalled).toBeLessThan(5000); // the shutdown deadline is 20 s
+    // 'exit' can fire before the last stdout chunk arrives.
+    await vi.waitFor(() => expect(out).toContain('"msg":"shutdown complete"'));
+    expect(out).toContain('"signal":"SIGTERM","msg":"shutdown started"');
   } finally {
     await holder.query('ROLLBACK').catch(() => {}); // no-op after COMMIT
     holder.release();

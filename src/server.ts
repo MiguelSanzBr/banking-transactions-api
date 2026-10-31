@@ -30,9 +30,10 @@ try {
 
 let stopRelay: (() => Promise<void>) | undefined; // set after listen; undefined if the relay is disabled
 let closing = false; // SIGTERM then SIGINT must not end the pool twice
-const shutdown = async () => {
+const shutdown = async (signal: NodeJS.Signals) => {
   if (closing) return;
   closing = true;
+  app.log.info({ signal }, 'shutdown started');
   // In-flight queries end within statement_timeout (15 s), but a frozen database can hold the drain open;
   // exit before compose's stop_grace_period (25 s) turns the stop into a SIGKILL.
   setTimeout(() => {
@@ -46,6 +47,7 @@ const shutdown = async () => {
     setInterval(() => app.server.closeIdleConnections(), 250).unref();
     await app.close();
     await pool.end();
+    app.log.info('shutdown complete');
   } catch (err) {
     app.log.error({ err: loggable(err) }, 'shutdown failed');
     process.exitCode = 1;

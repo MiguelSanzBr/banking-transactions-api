@@ -224,6 +224,20 @@ describe('POST /transfers', () => {
     expect(await balanceOf(app, a)).toBe(90);
   });
 
+  it('valid body plus an extra field → 400 VALIDATION_ERROR, nothing moved', async () => {
+    const [a, b] = [await newAccount(app), await newAccount(app)];
+    await depositTo(app, a, 100);
+    const res = await postTransfer(app, {
+      sourceAccountId: a,
+      destinationAccountId: b,
+      amount: 10,
+      foo: 1,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('VALIDATION_ERROR');
+    expect(await balanceOf(app, a)).toBe(100);
+  });
+
   it('COMPLETED transfer writes one TransferCompleted event; FAILED writes none', async () => {
     const [a, b] = [await newAccount(app), await newAccount(app)];
     await depositTo(app, a, 100);

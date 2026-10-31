@@ -1,4 +1,15 @@
-export type AccountStatus = 'ACTIVE' | 'BLOCKED' | 'CLOSED';
+// Single source for the TS type and the route's z.enum; the migration's CHECK repeats it as defense in depth.
+export const ACCOUNT_STATUSES = ['ACTIVE', 'BLOCKED', 'CLOSED'] as const;
+export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
+
+// A Record, not comparisons: a new status fails tsc here until someone decides what it may do.
+const MOVES: Record<AccountStatus, { debit: boolean; credit: boolean }> = {
+  ACTIVE: { debit: true, credit: true },
+  BLOCKED: { debit: false, credit: true },
+  CLOSED: { debit: false, credit: false },
+};
+export const canDebit = (status: AccountStatus) => MOVES[status].debit;
+export const canCredit = (status: AccountStatus) => MOVES[status].credit;
 
 export type Account = {
   id: string;
