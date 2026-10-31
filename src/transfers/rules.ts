@@ -1,4 +1,4 @@
-import type { AccountStatus } from '../accounts/rules.js';
+import { type AccountStatus, canCredit, canDebit } from '../accounts/rules.js';
 
 export type TransferFailureCode =
   | 'SOURCE_ACCOUNT_NOT_ACTIVE'
@@ -11,8 +11,8 @@ export function checkTransfer(
   destination: { status: AccountStatus },
   amountCents: number,
 ): TransferFailureCode | null {
-  if (source.status !== 'ACTIVE') return 'SOURCE_ACCOUNT_NOT_ACTIVE';
-  if (destination.status === 'CLOSED') return 'DESTINATION_ACCOUNT_CLOSED';
+  if (!canDebit(source.status)) return 'SOURCE_ACCOUNT_NOT_ACTIVE';
+  if (!canCredit(destination.status)) return 'DESTINATION_ACCOUNT_CLOSED';
   if (source.balanceCents < amountCents) return 'INSUFFICIENT_BALANCE';
   return null;
 }

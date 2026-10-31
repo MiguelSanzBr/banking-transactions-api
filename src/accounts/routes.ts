@@ -4,10 +4,10 @@ import type pg from 'pg';
 import { z } from 'zod';
 import { toAmount } from '../shared/money.js';
 import { errorResponses, uuidParam } from '../shared/schemas.js';
-import { type Account, normalizeDocument } from './rules.js';
+import { ACCOUNT_STATUSES, type Account, normalizeDocument } from './rules.js';
 import { changeStatus, createAccount, getAccount } from './service.js';
 
-const status = z.enum(['ACTIVE', 'BLOCKED', 'CLOSED']);
+const status = z.enum(ACCOUNT_STATUSES);
 
 const createBody = z.strictObject({
   // One refine, not .regex(): zod would export a regex as an OpenAPI `pattern` without the `u` flag, and clients would read `\p` as a literal "p".
