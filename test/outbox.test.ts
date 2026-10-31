@@ -5,7 +5,13 @@ import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { createPool, migrate } from '../src/db.js';
-import { type OutboxEvent, type Publisher, relayOnce, startRelay } from '../src/outbox/relay.js';
+import {
+  logPublisher,
+  type OutboxEvent,
+  type Publisher,
+  relayOnce,
+  startRelay,
+} from '../src/outbox/relay.js';
 
 let app: FastifyInstance;
 let pool: pg.Pool;
@@ -106,6 +112,28 @@ describe('outbox relay', () => {
     expect(log.error).toHaveBeenCalledWith(
       expect.objectContaining({ eventId: id, aggregateId, attempts: 2 }),
       'outbox event parked',
+    );
+  });
+
+  it('logPublisher puts the event, transfer and request ids at the top level of the log line', async () => {
+    const log = { info: vi.fn() };
+    const event = {
+      id: 'e1',
+      eventType: 'TransferCompleted',
+      aggregateId: 't1',
+      payload: { transferId: 't1', correlationId: 'c1' },
+      attempts: 0,
+    };
+    await logPublisher(log as unknown as FastifyBaseLogger)(event);
+    expect(log.info).toHaveBeenCalledWith(
+      {
+        eventId: 'e1',
+        eventType: 'TransferCompleted',
+        transferId: 't1',
+        correlationId: 'c1',
+        event,
+      },
+      'event published',
     );
   });
 

@@ -105,5 +105,16 @@ export function startRelay(
 export const logPublisher =
   (log: FastifyBaseLogger): Publisher =>
   async (event) => {
-    log.info({ event }, 'event published');
+    // Top-level ids so a log search finds the event by transfer or request without reaching into the payload.
+    const { correlationId } = event.payload as { correlationId?: string };
+    log.info(
+      {
+        eventId: event.id,
+        eventType: event.eventType,
+        transferId: event.aggregateId,
+        correlationId,
+        event,
+      },
+      'event published',
+    );
   };
