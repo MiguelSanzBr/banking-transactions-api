@@ -1,0 +1,29 @@
+meta {
+  name: Blocked source D -> B -> 422
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/transfers
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: ghi789-{{run}}
+}
+
+body:json {
+  {
+    "sourceAccountId": "{{accountD}}",
+    "destinationAccountId": "{{accountB}}",
+    "amount": 10.00
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.code: eq SOURCE_ACCOUNT_NOT_ACTIVE
+  res.body.correlationId: isString
+}

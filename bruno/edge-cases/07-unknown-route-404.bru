@@ -1,0 +1,17 @@
+meta {
+  name: Unknown route -> 404
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/nope
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 404
+  res.body.code: eq ROUTE_NOT_FOUND
+  res.body.correlationId: isString
+}

@@ -1,0 +1,26 @@
+meta {
+  name: Create account C (will be closed)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/accounts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "holderName": "Carla Dias",
+    "document": "{{docC}}"
+  }
+}
+
+assert {
+  res.status: eq 201
+}
+
+script:post-response {
+  bru.setEnvVar("accountC", res.body.id);
+}

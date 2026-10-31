@@ -1,0 +1,30 @@
+meta {
+  name: Deposit 100.00 into blocked D -> 201
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/accounts/{{accountD}}/deposits
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: depd-{{run}}
+}
+
+body:json {
+  {
+    "amount": 100.00
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.amount: eq 100
+}
+
+docs {
+  A BLOCKED account still receives credits.
+}

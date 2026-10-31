@@ -1,0 +1,40 @@
+meta {
+  name: Replay the deposit (same key, 500)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/accounts/{{accountA}}/deposits
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: dep-{{run}}
+}
+
+body:json {
+  {
+    "amount": 500
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.amount: eq 500
+}
+
+tests {
+  test("same deposit as the original", function () {
+    expect(res.body.id).to.equal(bru.getEnvVar("depositId"));
+  });
+
+  test("is an idempotent replay", function () {
+    expect(res.getHeader("idempotent-replayed")).to.equal("true");
+  });
+}
+
+docs {
+  `500` and `500.00` are the same payload, so this is a replay and does not credit twice.
+}

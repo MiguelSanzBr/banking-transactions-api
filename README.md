@@ -2,7 +2,7 @@
 
 API REST de contas e movimentações financeiras: criar conta, bloquear/desbloquear/encerrar, depositar, transferir entre contas com idempotência, consultar transferência e extrato paginado. Foco: **saldo nunca negativo, nenhuma movimentação duplicada e tudo rastreável**, com o código mais simples que defenda isso.
 
-Stack: Node 24 + TypeScript, Fastify 5, Zod 4, `pg` (SQL puro, sem ORM), PostgreSQL 17, Vitest + Testcontainers, Biome. Como a IA foi usada: [AI_USAGE.md](AI_USAGE.md).
+Stack: Node 24 + TypeScript, Fastify 5, Zod 4, `pg` (SQL puro, sem ORM), PostgreSQL 17, Vitest + Testcontainers, Biome. Como a IA foi usada: [AI_USAGE.md](AI_USAGE.md). Enunciado do desafio: [docs/desafio_tecnico_banking_transactions_services.md](docs/desafio_tecnico_banking_transactions_services.md).
 
 ## 1. Como rodar
 
@@ -45,9 +45,11 @@ Os testes de API chamam a aplicação real (`app.inject`) contra um Postgres de 
 | `test/api/openapi.test.ts`, `validation.test.ts` | `/docs/json` é OpenAPI 3 com todas as rotas; todo erro é um `$ref` para o único `ErrorEnvelope`; `amount` com descrição e exemplo e `holderName` sem `pattern`; `/docs` serve o Swagger UI; mensagem única da `Idempotency-Key` inválida ou ausente |
 | `test/outbox.test.ts` | roda em banco próprio (o relay publica tudo que está pendente); publica uma vez; falha incrementa `attempts` e para ao chegar em `maxAttempts` (3 no teste; o padrão de produção é 10); falha vira log `warn` e evento parado vira `error`; a publicação que falha é tentada de novo só no próximo intervalo, não na hora; `last_error` truncado e sem NUL; dois relays concorrentes não publicam o mesmo evento (`SKIP LOCKED`); publicador mais lento que o `idle_in_transaction` derruba a rodada, não o processo; `startRelay` com parada limpa e backlog de vários lotes sem esperar um intervalo por lote |
 
+![Como saber que funciona: testes contra PostgreSQL real, mutação que remove o ON CONFLICT e faz o teste falhar, e a coleção do Bruno](docs/gifs/7-como-sei-que-funciona.gif)
+
 ## 3. Consumindo a API
 
-Swagger UI em `/docs`, gerado dos mesmos schemas Zod que validam as requisições (não diverge do código). Dinheiro trafega como `number` em reais (`"amount": 250.00`) e datas em ISO 8601 UTC. Rotas: `POST /accounts`, `GET /accounts/{id}`, `PATCH /accounts/{id}/status`, `POST /accounts/{id}/deposits`, `POST /transfers`, `GET /transfers/{id}`, `GET /accounts/{id}/statement?from&to&limit&cursor`, `GET /health`, `GET /ready`.
+Swagger UI em `/docs`, gerado dos mesmos schemas Zod que validam as requisições (não diverge do código). Dinheiro trafega como `number` em reais (`"amount": 250.00`) e datas em ISO 8601 UTC. Rotas: `POST /accounts`, `GET /accounts/{id}`, `PATCH /accounts/{id}/status`, `POST /accounts/{id}/deposits`, `POST /transfers`, `GET /transfers/{id}`, `GET /accounts/{id}/statement?from&to&limit&cursor`, `GET /health`, `GET /ready`. A pasta `bruno/` é uma coleção do [Bruno](https://www.usebruno.com) com todas elas (abra a pasta, escolha o ambiente `local` e rode a coleção em ordem: os requests passam ids de um para o outro por variáveis).
 
 Roteiro com `curl` (bash ou zsh, não `sh`; precisa de `jq`; a API tem que estar no ar):
 
@@ -102,6 +104,8 @@ docker compose logs api | grep "$T"
 
 Por que não Clean/Hexagonal: o domínio cabe em 5 tabelas e a correção da transferência *depende* do SQL (lock, ordem, `CHECK`, `ON CONFLICT`). Portas e repositórios aqui só repassariam chamadas e esconderiam o trecho que a revisão precisa enxergar. A regra que muda com o negócio (saldo, status) fica isolada em `rules.ts`. Trade-off aceito: trocar de banco significa reescrever os `service.ts`; como a consistência vem de recursos do Postgres, a troca não seria mecânica de qualquer jeito. Dependências de runtime: `fastify`; `zod` + `fastify-type-provider-zod` (um schema só valida, tipa e gera o OpenAPI) com `@fastify/swagger` e `@fastify/swagger-ui` (o `/docs`); `pg`. Sem ORM, pelo mesmo motivo.
 
+![Arquitetura: o cliente chama o Fastify (app.ts), que passa por routes.ts, service.ts e rules.ts até o PostgreSQL; o relay do outbox lê os eventos e os entrega ao publicador](docs/gifs/1-arquitetura.gif)
+
 ### Transações e concorrência
 
 - **Uma transação por comando.** Toda escrita roda em `withTransaction` (BEGIN/COMMIT, ROLLBACK em qualquer erro): a transferência inteira vale ou nada vale. `GET` roda sem transação. Isolamento fixado no `BEGIN` (`ISOLATION LEVEL READ COMMITTED`): o re-read do `ON CONFLICT` depende de cada comando ter um snapshot novo, e sem isso, num banco com padrão `REPEATABLE READ`, toda corrida virava 503 (sem saldo errado, mas a API parava de funcionar sob concorrência). Os locks de linha já serializam o que importa.
@@ -112,6 +116,8 @@ Por que não **otimista** (coluna `version`): em conta quente o conflito é o ca
 
 Por que não a **operação atômica** que o enunciado lista (`UPDATE accounts SET balance_cents = balance_cents - $x WHERE id = $1 AND balance_cents >= $x AND status = 'ACTIVE'`, um round trip só): (1) uma transferência mexe em duas linhas, e dois `UPDATE`s A→B e B→A dão deadlock a menos que as linhas sejam travadas em ordem de `id`, que é o que o `FOR UPDATE` já faz; (2) o `UPDATE` diz *que* não debitou, não *por quê* (`INSUFFICIENT_BALANCE`, `SOURCE_ACCOUNT_NOT_ACTIVE`, conta inexistente), e a rejeição precisa ser persistida como `FAILED` com o motivo; (3) o status das duas contas (origem ativa, destino não encerrado) e o saldo precisam vir de uma leitura só e consistente, para o `balance_after_cents` de cada lançamento e a ordem do `id` do ledger valerem (extrato, abaixo). O `UPDATE` condicional bastaria para um débito numa conta só, sem destino; o ganho dele, menos idas ao banco com o lock preso, é a otimização que eu faria na conta quente (seção 6).
 
+![Concorrência: duas transferências de 80,00 sobre saldo 100,00, só uma completa por causa do FOR UPDATE; e A→B com B→A sem deadlock porque as duas travam primeiro a conta de menor id](docs/gifs/4-concorrencia.gif)
+
 ### Idempotência
 
 **Fluxo de `POST /transfers`** (uma transação; é a ordem real do código):
@@ -121,6 +127,8 @@ Por que não a **operação atômica** que o enunciado lista (`UPDATE accounts S
 3. Aplica as regras e insere em `transfers` com `ON CONFLICT (idempotency_key) DO NOTHING`, já como `COMPLETED` ou `FAILED`.
 4. Se o insert não devolveu linha, outra requisição com a mesma chave commitou antes: relê a chave e responde como no passo 1 (replay ou 422), nunca 500.
 5. Só se `COMPLETED`: atualiza os dois saldos e grava os dois lançamentos do ledger e o evento do outbox.
+
+![Transferência passo a passo: validação, BEGIN, busca da chave, lock das contas em ordem de id, regras, INSERT com ON CONFLICT, saldos, ledger e evento, COMMIT e resposta 201, com o estado do banco mudando ao lado](docs/gifs/2-transferencia.gif)
 
 Duas requisições simultâneas com a mesma chave caem no passo 4. Com as **mesmas contas**, a segunda espera o lock do passo 2 e devolve o resultado da primeira (coberto por teste: 10 em paralelo, uma movimentação). Com **contas diferentes** o resultado é 422 `IDEMPOTENCY_KEY_REUSED`: se não há conta em comum, não há disputa de lock e o `INSERT` da segunda espera a primeira terminar (índice `UNIQUE`); se há uma (A→B e A→C), a segunda espera o lock dela e cai no passo 4. Nunca 500 e nunca duas movimentações; o caso de contas diferentes decorre do `UNIQUE` e não tem teste dedicado.
 
@@ -133,6 +141,8 @@ Regras:
 - **Rejeição de negócio depois de travar as contas** (saldo insuficiente, origem não ativa, destino encerrado) é **persistida** como transferência `FAILED` e **consome a chave**: o retry devolve a mesma 422 com o mesmo `transferId`. Motivo: o retry precisa ser determinístico e auditável; sem gravar, o mesmo request daria 422 hoje e 201 amanhã. Quem quer tentar de novo usa **outra chave**. Custo assumido: o cliente que recebeu `INSUFFICIENT_BALANCE`, depositou e reenviou com a mesma chave continua recebendo a 422 original.
 - **Não gravam nada nem consomem a chave:** 400, 404, `SAME_ACCOUNT`, `INVALID_AMOUNT`, `AMOUNT_LIMIT_EXCEEDED` e `IDEMPOTENCY_KEY_REUSED`. O depósito não tem estado `FAILED`: a rejeição (`ACCOUNT_CLOSED`) também não grava nada. O 503 normalmente não grava, mas **pode ter gravado**: seção 5, "503 e resultado incerto".
 - **Sem expiração** neste escopo (TTL e limpeza: seção 8).
+
+![Idempotência: retry com a mesma chave devolve a mesma transferência sem debitar de novo; outro valor com a mesma chave dá 422; 10 requisições paralelas com a mesma chave gravam uma linha só](docs/gifs/3-idempotencia.gif)
 
 ### Dinheiro em centavos
 
@@ -175,6 +185,8 @@ Uma transferência concluída grava, **na mesma transação**, um evento `Transf
 
 Um relay dentro do processo da API lê até 50 pendentes por rodada e os entrega a um publicador, que neste escopo só escreve `event published` no log; marca `published_at` ao publicar e, em falha, incrementa `attempts`, guarda `last_error` e loga (`outbox publish failed` em warn; ao esgotar as tentativas, `outbox event parked` em error). Rodada com lote cheio é seguida de outra na hora, então um backlog drena sem esperar `OUTBOX_RELAY_INTERVAL_MS` por lote; com lote parcial, rodada que falhou ou publicação com erro ele espera o intervalo, para uma queda do broker não virar laço quente. Depois de 10 tentativas o evento para de ser tentado e fica à espera de alguém (como achar: seção 5); não há backoff por evento (com um broker de verdade eu usaria um `next_attempt_at` com backoff exponencial ou o retry e a DLQ nativos do SQS). Entrega **at least once**: o consumidor deduplica pelo `eventId`. O `correlationId` é o da requisição que executou a transferência (um replay não gera evento novo). O publicador real (SNS/SQS, Kafka) fica fora do escopo (seção 8).
 
+![Outbox: a transferência grava o evento na mesma transação; o relay pega pendentes com SKIP LOCKED, publica, conta falhas e para depois de 10; dois relays pegam linhas diferentes](docs/gifs/5-outbox.gif)
+
 ## 5. Operação
 
 **Logs.** JSON em stdout (pino). Cada linha de requisição tem `correlationId` (as do relay e da inicialização não): o header `x-correlation-id` é aceito se casar `^[A-Za-z0-9._-]{1,128}$`, senão a API gera um UUID; o valor volta no header da resposta e no envelope de erro. Linhas de negócio, em info: `account created` (`accountId`), `account status changed` (`accountId`, `from`, `to`, só quando o status mudou), `deposit processed` (`depositId`, `accountId`, `idempotencyKey`, `replayed`), `transfer processed` (`transferId`, `idempotencyKey`, `status`, `failureCode`, `replayed`) e `event published` (relay). Toda resposta 4xx gera `request rejected` com `code`, `statusCode` e `idempotencyKey`, e o 5xx gera `request failed` com a chave também; a chave só entra se for válida (1 a 255 ASCII visíveis), senão o log leva `idempotencyKeyInvalid: true` e nunca o header cru. Uma 422 se explica só pelos logs. `/health` e `/ready` não geram linha de requisição (o healthcheck bate a cada poucos segundos); só a falha aparece (`readiness check failed`). **Nunca** vão para o log o documento, o nome nem o corpo da requisição; o `detail` dos erros do `pg` (que pode conter o documento de uma violação de unicidade) é descartado.
@@ -198,6 +210,8 @@ Um relay dentro do processo da API lê até 50 pendentes por rodada e os entrega
 O TCP keepalive começa depois de 10 s de silêncio. Banco congelado (`docker compose pause db`), medido numa conexão já aberta: 503 em 20 s numa leitura e em 21 s numa transferência (20 s do `query_timeout` + 1 s do `ROLLBACK`), sem reiniciar a API; ao voltar, ela responde sozinha. Com o pool frio (o `pg` fecha as conexões ociosas depois de 10 s), abrir uma conexão nova num banco congelado estoura os 5 s do pool e dá 503 em 5 s. Viram 503 com `Retry-After: 1`: os timeouts acima, deadlock (`40P01`), falha de serialização (`40001`), banco indisponível (`57P01`, `57P02`, `57P03`, `53300` e a classe `08`) e falhas de rede (`ECONNREFUSED`, `ECONNRESET`, `ENOTFOUND` quando o compose remove o DNS do banco parado, `EAI_AGAIN`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`), mais pool encerrado e cliente com a conexão já morta.
 
 **Queda de conexão e shutdown.** Uma conexão que cai no meio de uma transação não derruba o processo: todo client em uso tem um listener de `error` (sem ele, um client morto em uso encerra o processo) e a requisição afetada recebe 503, o pool descarta o client e a próxima funciona. No compose a API e o banco têm `restart: unless-stopped`: a API volta sozinha se o processo cair ou sair no boot porque o banco não estava pronto (nesse caso ela loga uma linha estruturada e sai com código 1, e a política tenta de novo). Isto foi verificado durante o desenvolvimento por agentes de IA (quem implementou e a bancada de revisores), com `docker compose stop db` e `start db` sob carga, e li os resultados: tudo devolve 503 enquanto o banco está fora (`/health` segue 200) e a API volta a responder sozinha, em segundos, quando ele aceita conexões de novo. Em `SIGTERM`/`SIGINT` ela para o relay (esperando a rodada em andamento), para de aceitar conexões, espera as requisições em andamento, fecha cada conexão keep-alive assim que ela fica ociosa e fecha o pool, para não cortar uma transação no meio. Sem fechar as ociosas, o socket de uma requisição que termina durante o desligamento ficaria aberto pelos 72 s do keep-alive e seguraria o processo; com isso, um `docker compose stop` sob carga (40 clientes keep-alive) sai com código 0 em menos de 1 s (medido por um agente de IA durante o desenvolvimento; `test/server.test.ts` cobre o caso de uma requisição em andamento). O desligamento tem limite: o compose define `stop_grace_period: 25s` (acima do `statement_timeout` de 15 s; o padrão de 10 s mandaria `SIGKILL` no meio de uma transação legítima), e um prazo duro de 20 s (log e saída com código 1) só entra em ação quando uma requisição ou o `pool.end()` ficam presos num banco congelado; o que passar disso é cortado e o Postgres dá rollback da transação aberta.
+
+![Falhas do banco: com o banco parado a API responde 503 com Retry-After: 1 e continua de pé; com o banco de volta, a próxima requisição responde 200](docs/gifs/6-falhas-do-banco.gif)
 
 **503 e resultado incerto.** Um 503 quase sempre significa que nada foi gravado (a transação deu rollback e a chave não foi consumida), mas não sempre: se a conexão cai ou o `COMMIT` estoura o timeout, a API não sabe se o banco confirmou. Por isso reenvie com a **mesma** `Idempotency-Key`: se gravou, a resposta é um replay; se não, executa. Transferência exige chave, então está coberta. **Um depósito enviado sem chave e reenviado depois de um 503 pode creditar duas vezes**; é por isso que recomendo a chave em todo depósito. Criar conta se resolve pelo `UNIQUE` (o retry de uma conta que foi criada devolve 409), mas sem listagem nem busca por documento o cliente não tem como achar o `id` (seção 8).
 

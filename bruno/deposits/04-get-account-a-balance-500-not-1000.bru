@@ -1,0 +1,16 @@
+meta {
+  name: Get account A (balance 500, not 1000)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/accounts/{{accountA}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.balance: eq 500
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Statement with from after to -> 400
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{baseUrl}}/accounts/{{accountA}}/statement?from=2026-02-01&to=2026-01-01
+  body: none
+  auth: none
+}
+
+params:query {
+  from: 2026-02-01
+  to: 2026-01-01
+}
+
+assert {
+  res.status: eq 400
+  res.body.code: eq VALIDATION_ERROR
+  res.body.correlationId: isString
+}

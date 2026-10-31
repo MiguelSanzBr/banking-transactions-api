@@ -1,0 +1,22 @@
+meta {
+  name: Unblock account D
+  type: http
+  seq: 12
+}
+
+patch {
+  url: {{baseUrl}}/accounts/{{accountD}}/status
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "ACTIVE"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq ACTIVE
+}

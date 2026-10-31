@@ -1,0 +1,23 @@
+meta {
+  name: Deposit amount as string -> 400
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/accounts/{{accountA}}/deposits
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "amount": "100"
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.code: eq VALIDATION_ERROR
+  res.body.correlationId: isString
+}

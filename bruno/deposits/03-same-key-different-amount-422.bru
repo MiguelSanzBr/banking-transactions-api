@@ -1,0 +1,27 @@
+meta {
+  name: Same key, different amount -> 422
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/accounts/{{accountA}}/deposits
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: dep-{{run}}
+}
+
+body:json {
+  {
+    "amount": 100.00
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.code: eq IDEMPOTENCY_KEY_REUSED
+  res.body.correlationId: isString
+}

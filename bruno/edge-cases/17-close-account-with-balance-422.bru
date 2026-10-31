@@ -1,0 +1,23 @@
+meta {
+  name: Close account with balance -> 422
+  type: http
+  seq: 17
+}
+
+patch {
+  url: {{baseUrl}}/accounts/{{accountA}}/status
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "CLOSED"
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.code: eq ACCOUNT_HAS_BALANCE
+  res.body.correlationId: isString
+}

@@ -1,0 +1,27 @@
+meta {
+  name: Full statement of A
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/accounts/{{accountA}}/statement
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: length 3
+  res.body.nextCursor: isNull
+}
+
+tests {
+  test("oldest first, FAILED attempts left out", function () {
+    expect(res.body.items.map((i) => i.type)).to.deep.equal(["DEPOSIT", "TRANSFER_OUT", "TRANSFER_OUT"]);
+  });
+
+  test("balanceAfter follows the ledger", function () {
+    expect(res.body.items.map((i) => i.balanceAfter)).to.deep.equal([500, 250, 240]);
+  });
+}

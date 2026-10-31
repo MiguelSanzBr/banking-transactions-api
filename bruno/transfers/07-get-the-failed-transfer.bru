@@ -1,0 +1,17 @@
+meta {
+  name: Get the failed transfer
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/transfers/{{failedTransferId}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq FAILED
+  res.body.failureCode: eq INSUFFICIENT_BALANCE
+}

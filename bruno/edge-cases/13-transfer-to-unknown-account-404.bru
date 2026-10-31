@@ -1,0 +1,29 @@
+meta {
+  name: Transfer to unknown account -> 404
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/transfers
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: vwx234-{{run}}
+}
+
+body:json {
+  {
+    "sourceAccountId": "{{accountA}}",
+    "destinationAccountId": "00000000-0000-4000-8000-000000000000",
+    "amount": 10.00
+  }
+}
+
+assert {
+  res.status: eq 404
+  res.body.code: eq ACCOUNT_NOT_FOUND
+  res.body.correlationId: isString
+}

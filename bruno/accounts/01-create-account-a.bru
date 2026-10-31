@@ -1,0 +1,57 @@
+meta {
+  name: Create account A
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/accounts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "holderName": "Ana Souza",
+    "document": "{{docA}}"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.status: eq ACTIVE
+  res.body.balance: eq 0
+  res.body.id: isString
+}
+
+script:pre-request {
+  // Fresh suffix every run: the document and the Idempotency-Key are globally unique in the API.
+  const run = String(Date.now());
+  const digits = run.slice(-10);
+  const mask = (d) => d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  bru.setEnvVar("run", run);
+  bru.setEnvVar("docA", digits + "1");
+  bru.setEnvVar("docB", digits + "2");
+  bru.setEnvVar("docC", digits + "3");
+  bru.setEnvVar("docD", digits + "4");
+  bru.setEnvVar("docAMasked", mask(digits + "1"));
+  bru.setEnvVar("docBMasked", mask(digits + "2"));
+}
+
+script:post-response {
+  bru.setEnvVar("accountA", res.body.id);
+}
+
+tests {
+  test("document is stored as digits", function () {
+    expect(res.body.document).to.equal(bru.getEnvVar("docA"));
+  });
+
+  test("Location points to the new account", function () {
+    expect(res.getHeader("location")).to.equal("/accounts/" + res.body.id);
+  });
+}
+
+docs {
+  Run this first: it generates the run suffix, the documents and saves `accountA`. Run the collection in order (the requests share state through runtime variables).
+}

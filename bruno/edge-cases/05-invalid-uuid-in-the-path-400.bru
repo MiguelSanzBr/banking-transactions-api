@@ -1,0 +1,17 @@
+meta {
+  name: Invalid UUID in the path -> 400
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/accounts/not-a-uuid
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 400
+  res.body.code: eq VALIDATION_ERROR
+  res.body.correlationId: isString
+}

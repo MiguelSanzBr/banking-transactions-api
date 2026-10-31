@@ -1,0 +1,25 @@
+meta {
+  name: Transfer without Idempotency-Key -> 400
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/transfers
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "sourceAccountId": "{{accountA}}",
+    "destinationAccountId": "{{accountB}}",
+    "amount": 10.00
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.code: eq VALIDATION_ERROR
+  res.body.correlationId: isString
+}

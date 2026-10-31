@@ -1,0 +1,24 @@
+meta {
+  name: Duplicate document, with mask -> 409
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/accounts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "holderName": "Outra Ana",
+    "document": "{{docAMasked}}"
+  }
+}
+
+assert {
+  res.status: eq 409
+  res.body.code: eq DOCUMENT_ALREADY_EXISTS
+  res.body.correlationId: isString
+}

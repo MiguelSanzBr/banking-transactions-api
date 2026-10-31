@@ -1,0 +1,38 @@
+meta {
+  name: Insufficient balance -> 422 (recorded as FAILED)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/transfers
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: def456-{{run}}
+}
+
+body:json {
+  {
+    "sourceAccountId": "{{accountA}}",
+    "destinationAccountId": "{{accountB}}",
+    "amount": 1000.00
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.code: eq INSUFFICIENT_BALANCE
+  res.body.correlationId: isString
+  res.body.transferId: isString
+}
+
+script:post-response {
+  bru.setEnvVar("failedTransferId", res.body.transferId);
+}
+
+docs {
+  A business rejection is stored as a FAILED transfer and consumes the key. Retry with another key.
+}
