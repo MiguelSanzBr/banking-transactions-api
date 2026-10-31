@@ -127,3 +127,29 @@ describe('timeouts', () => {
     expect(rowCount).toBe(0);
   });
 });
+
+// The constraint name pins the check under test: a ledger row without a deposit or transfer would also fail with 23514.
+describe('CHECK constraints', () => {
+  it('database rejects a negative balance even if the code lets it through', async () => {
+    const a = await newAccount(app);
+    await expect(
+      pool.query('UPDATE accounts SET balance_cents = -1 WHERE id = $1', [a]),
+    ).rejects.toMatchObject({ code: '23514', constraint: 'accounts_balance_cents_check' });
+  });
+
+  it('database rejects a ledger entry with a negative balance_after even if the code lets it through', async () => {
+    const a = await newAccount(app);
+    await depositTo(app, a, 1);
+    const { rows } = await pool.query('SELECT id FROM deposits WHERE account_id = $1', [a]);
+    await expect(
+      pool.query(
+        `INSERT INTO ledger_entries (account_id, type, amount_cents, balance_after_cents, deposit_id)
+         VALUES ($1, 'DEPOSIT', 1, -1, $2)`,
+        [a, rows[0].id],
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'ledger_entries_balance_after_cents_check',
+    });
+  });
+});
