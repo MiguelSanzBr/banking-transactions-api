@@ -2,7 +2,14 @@ import { randomInt, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { balanceOf, depositTo, makeApp, newAccount, postTransfer } from '../helpers.js';
+import {
+  balanceOf,
+  depositTo,
+  makeApp,
+  newAccount,
+  postTransfer,
+  waitForQueue,
+} from '../helpers.js';
 
 let app: FastifyInstance;
 let pool: pg.Pool;
@@ -22,15 +29,25 @@ const t = (sourceAccountId: string, destinationAccountId: string, amount: number
 });
 
 describe('concurrent transfers', () => {
-  it('balance 100, two parallel transfers of 80 → exactly one completes, balance 20', async () => {
+  it('balance 100, two overlapping transfers of 80 → exactly one completes, balance 20', async () => {
     const [a, b, c] = [await newAccount(app), await newAccount(app), await newAccount(app)];
     await depositTo(app, a, 100);
-    // Warm up two pool connections so both transfers start together instead of the 2nd dialing a new one.
-    await Promise.all([balanceOf(app, a), balanceOf(app, a)]);
-    const [r1, r2] = await Promise.all([
-      postTransfer(app, t(a, b, 80)),
-      postTransfer(app, t(a, c, 80)),
-    ]);
+    // Hold the source's lock and queue both transfers behind it: the overlap is guaranteed, not left to timing.
+    const holder = await pool.connect();
+    let r1: Awaited<ReturnType<typeof postTransfer>>;
+    let r2: Awaited<ReturnType<typeof postTransfer>>;
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE', [a]);
+      const { rows } = await holder.query('SELECT pg_backend_pid() AS pid');
+      const pending = Promise.all([postTransfer(app, t(a, b, 80)), postTransfer(app, t(a, c, 80))]);
+      await waitForQueue(pool, rows[0].pid, 2);
+      await holder.query('COMMIT');
+      [r1, r2] = await pending;
+    } finally {
+      await holder.query('ROLLBACK').catch(() => {}); // no-op after COMMIT
+      holder.release();
+    }
     expect([r1.statusCode, r2.statusCode].sort()).toEqual([201, 422]);
     expect([r1, r2].find((r) => r.statusCode === 422)?.json().code).toBe('INSUFFICIENT_BALANCE');
     expect(await balanceOf(app, a)).toBe(20);
