@@ -12,7 +12,7 @@ JSON em stdout (pino).
   - `account status changed` (`accountId`, `from`, `to`, só quando o status mudou);
   - `deposit processed` (`depositId`, `accountId`, `idempotencyKey`, `replayed`);
   - `transfer processed` (`transferId`, `idempotencyKey`, `status`, `failureCode`, `replayed`);
-  - `event published` (relay).
+  - `event published` (relay: `eventId`, `eventType`, `transferId` e `correlationId` na raiz, mais o evento inteiro em `event`).
 - **Rejeições.** Toda resposta 4xx gera `request rejected` com `code`, `statusCode` e `idempotencyKey`; o 5xx gera `request failed`, também com a chave. A chave só entra se for válida (1 a 255 ASCII visíveis); senão o log leva `idempotencyKeyInvalid: true`, nunca o header cru. Uma 422 se explica só pelos logs.
 - **Probes.** `/health` e `/ready` não geram linha de requisição (o healthcheck bate a cada poucos segundos); só a falha aparece (`readiness check failed`).
 - **Nunca** vão para o log o documento, o nome nem o corpo da requisição. O `detail` dos erros do `pg` (que pode conter o documento de uma violação de unicidade) é descartado.
@@ -21,7 +21,7 @@ JSON em stdout (pino).
 
 O cliente tem o `correlationId` (header da resposta e envelope de erro) ou o `transferId` (corpo, inclusive o da 422 persistida).
 
-- `docker compose logs api | grep <correlationId>` mostra a requisição inteira, incluindo `transfer processed` e, depois, o `event published` (o evento carrega o mesmo `correlationId`).
+- `docker compose logs api | grep <correlationId>` mostra a requisição inteira, incluindo `transfer processed` e, depois, o `event published` (a linha traz o mesmo `correlationId` na raiz).
 - `grep <transferId>` acha o `transfer processed` e o `event published` pelo outro lado, mais as linhas de qualquer replay ou `GET /transfers/<id>`, que trazem o id.
 - Caminho: `correlationId` → linhas da requisição → `transferId` → `event published`.
 - No banco (`docker compose exec db psql -U banking`): `transfers` (`WHERE idempotency_key = '<chave>'`), os dois lançamentos de `ledger_entries` (`WHERE transfer_id = ...`) e o evento do outbox (`WHERE aggregate_id = ...`).
@@ -55,7 +55,7 @@ Nada espera para sempre:
 - **Conexão que cai no meio de uma transação** não derruba o processo: todo client em uso tem um listener de `error` (sem ele, um client morto em uso encerra o processo). A requisição afetada recebe 503, o pool descarta o client e a próxima funciona.
 - **Restart.** No compose, a API e o banco têm `restart: unless-stopped`: a API volta sozinha se o processo cair ou sair no boot porque o banco não estava pronto (nesse caso ela loga uma linha estruturada e sai com código 1, e a política tenta de novo).
 - **Banco parado.** Verificado durante o desenvolvimento por agentes de IA (quem implementou e os revisores), com `docker compose stop db` e `start db` sob carga, e li os resultados: tudo devolve 503 enquanto o banco está fora (`/health` segue 200) e a API volta a responder sozinha, em segundos, quando ele aceita conexões de novo.
-- **`SIGTERM`/`SIGINT`.** A API para o relay (esperando a rodada em andamento), para de aceitar conexões, espera as requisições em andamento, fecha cada conexão keep-alive assim que ela fica ociosa e fecha o pool, para não cortar uma transação no meio.
+- **`SIGTERM`/`SIGINT`.** A API para o relay (esperando a rodada em andamento), para de aceitar conexões, espera as requisições em andamento, fecha cada conexão keep-alive assim que ela fica ociosa e fecha o pool, para não cortar uma transação no meio. O desligamento escreve `shutdown started` (com o sinal) e, ao fechar o pool, `shutdown complete`.
 - **Por que fechar as ociosas.** Sem isso, o socket de uma requisição que termina durante o desligamento ficaria aberto pelos 72 s do keep-alive e seguraria o processo. Com isso, um `docker compose stop` sob carga (40 clientes keep-alive) sai com código 0 em menos de 1 s (medido por um agente de IA durante o desenvolvimento; `test/server.test.ts` cobre o caso de uma requisição em andamento).
 - **Limite.** O compose define `stop_grace_period: 25s`, acima do `statement_timeout` de 15 s (o padrão de 10 s mandaria `SIGKILL` no meio de uma transação legítima). Um prazo duro de 20 s (log e saída com código 1) só entra em ação quando uma requisição ou o `pool.end()` ficam presos num banco congelado; o que passar disso é cortado e o Postgres dá rollback da transação aberta.
 
